@@ -10,11 +10,9 @@ const char screenPixelShaderString[] = R"(
 #ifdef KODELIFE
 #define DOWNSCALE   3.0
 #define MAIN        ps_main
-#define RESOLUTION  Resolution
 #else
 #define DOWNSCALE   Downscale
 #define MAIN        main
-#define RESOLUTION  (resolution())
 #endif
 
 #define PI          3.141592654
@@ -24,13 +22,23 @@ Texture2D shaderTexture;
 SamplerState samplerState;
 
 cbuffer PixelShaderSettings {
-  float ScaledScanLinePeriod;
-  float ScaledGaussianSigma;
   float Downscale;
 #ifdef KODELIFE
   float2 Resolution;
+#else
+  float Width;
+  float Height;
 #endif
+  float4 Background;    // abgr
 };
+
+float2 resolution() {
+#ifdef KODELIFE
+  return Resolution;
+#else
+  return float2(Width, Height);
+#endif
+}
 
 // HSV to RGB conversion
 //  From: https://stackoverflow.com/questions/15095909/from-rgb-to-hsv-in-opengl-glsl
@@ -70,16 +78,11 @@ float psin(float a) {
   return 0.5+0.5*sin(a);
 }
 
-float2 resolution() {
-  int width;
-  int height;
-  shaderTexture.GetDimensions(width, height);
-  return float2(width, height);
-}
-
 float3 sampleHSV(float2 p) {
   float2 cp = abs(p - 0.5);
-  return rgb2hsv(shaderTexture.SampleLevel(samplerState, p, 0).xyz)*step(cp.x, 0.5)*step(cp.y, 0.5);
+  float4 s = shaderTexture.Sample(samplerState, p);
+  float3 col = lerp(Background.wzy, s.xyz, s.w);
+  return rgb2hsv(col)*step(cp.x, 0.5)*step(cp.y, 0.5);
 }
 
 float3 screen(float2 reso, float2 p, float diff, float spe) {
@@ -131,7 +134,7 @@ float3 color(float2 reso, float3 ro, float2 p) {
   // The screen is imagined to be projected on a large sphere to give it a curve
   const float radius = 20.0;
   const float4 center = float4(0.0, 0.0, radius, radius-1.0);
-  float3 lightPos = 0.95*float3(-1.0, 1.0, 0.0);
+  float3 lightPos = 0.95*float3(-1.0, -1.0, 0.0);
 
   // Find the ray sphere intersection, basically a single ray tracing step
   float sd = raySphere(ro, rd, center);
@@ -156,7 +159,7 @@ float3 color(float2 reso, float3 ro, float2 p) {
 }
 
 float4 MAIN(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
-  float2 reso = RESOLUTION;
+  float2 reso = resolution();
   float2 q = tex;
   float2 p = -1. + 2. * q;
   p.x *= reso.x/reso.y;
