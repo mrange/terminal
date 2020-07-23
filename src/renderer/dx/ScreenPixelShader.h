@@ -142,7 +142,7 @@ float3 color(float2 reso, float3 ro, float2 p) {
   }
 }
 
-float4 ps_main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
+float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
   float2 reso = RESOLUTION;
   float2 q = tex;
   float2 p = -1. + 2. * q;
