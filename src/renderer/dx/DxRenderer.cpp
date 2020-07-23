@@ -346,6 +346,9 @@ void DxEngine::_ComputePixelShaderSettings() noexcept
 
     // Gaussian distribution sigma used for blurring.
     _pixelShaderSettings.ScaledGaussianSigma = _scale * 2.0f;
+
+    // How much to downscale the resolution
+    _pixelShaderSettings.Downscale = _scale * 2.0f;
 }
 
 // Routine Description;

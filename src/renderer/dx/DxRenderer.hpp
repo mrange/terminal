@@ -223,6 +223,7 @@ namespace Microsoft::Console::Render
         {
             float ScaledScanLinePeriod;
             float ScaledGaussianSigma;
+            float Downscale;
 #pragma warning(suppress : 4324) // structure was padded due to __declspec(align())
         } _pixelShaderSettings;
 

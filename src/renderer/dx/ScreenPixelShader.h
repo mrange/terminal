@@ -4,11 +4,21 @@
 const char screenPixelShaderString[] = "";
 #else
 const char screenPixelShaderString[] = R"(
-//#define RESOLUTION Resolution
+// In order to run in KodeLife (great Shader IDE and free with some nagging), define the following:
+// #define KODELIFE
+
+#ifdef KODELIFE
+#define DOWNSCALE   3.0
+#define MAIN        ps_main
+#define RESOLUTION  Resolution
+#else
+#define DOWNSCALE   Downscale
+#define MAIN        main
 #define RESOLUTION  (resolution())
+#endif
+
 #define PI          3.141592654
 #define TAU         (2.0*PI)
-#define DOWNSCALE   3.0
 
 Texture2D shaderTexture;
 SamplerState samplerState;
@@ -16,7 +26,10 @@ SamplerState samplerState;
 cbuffer PixelShaderSettings {
   float ScaledScanLinePeriod;
   float ScaledGaussianSigma;
+  float Downscale;
+#ifdef KODELIFE
   float2 Resolution;
+#endif
 };
 
 // HSV to RGB conversion
@@ -82,7 +95,7 @@ float3 screen(float2 reso, float2 p, float diff, float spe) {
 
   // Viginetting
   float2 vp = ap + 0.5;
-  float vig = tanh(pow(100.0*vp.x*vp.y*(1.0-vp.x)*(1.0-vp.y), 0.35));
+  float vig = tanh(pow(max(100.0*vp.x*vp.y*(1.0-vp.x)*(1.0-vp.y), 0.0), 0.35));
 
   ap *= 1.025;
 
@@ -142,7 +155,7 @@ float3 color(float2 reso, float3 ro, float2 p) {
   }
 }
 
-float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
+float4 MAIN(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
   float2 reso = RESOLUTION;
   float2 q = tex;
   float2 p = -1. + 2. * q;
