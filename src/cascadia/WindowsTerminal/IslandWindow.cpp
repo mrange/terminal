@@ -8,6 +8,11 @@
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
+
+#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "Shell32.lib")
+
+
 using namespace winrt::Windows::UI;
 using namespace winrt::Windows::UI::Composition;
 using namespace winrt::Windows::UI::Xaml;
