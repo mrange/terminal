@@ -709,7 +709,7 @@ GUID Profile::GetGuidOrGenerateForJson(const Json::Value& json) noexcept
     return Profile::_GenerateGuidForProfile(name, source);
 }
 
-void Profile::SetPixelShaderEffect(const std::optional<std::wstring> & value) noexcept
+void Profile::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
 {
     _pixelShaderEffect = value;
 }

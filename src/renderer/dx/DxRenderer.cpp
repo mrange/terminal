@@ -60,21 +60,22 @@ using namespace Microsoft::Console::Types;
 
 namespace
 {
-    const std::map<std::wstring, std::string> pixelShaderPresets = {
-        { L"RETRO"   , retroPixelShaderString    },
-        { L"RETROII" , retroIIPixelShaderString  },
+    const std::map<std::wstring_view, std::string_view> pixelShaderPresets = {
+        { L"RETRO", retroPixelShaderString },
+        { L"RETROII", retroIIPixelShaderString },
     };
-    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect) noexcept
+
+    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
     {
         try
         {
-            auto pixelShaderPreset = pixelShaderPresets.find(pixelShaderEffect);
+            const auto pixelShaderPreset = pixelShaderPresets.find(pixelShaderEffect);
 
             if (pixelShaderPreset != pixelShaderPresets.end())
             {
-              return pixelShaderPreset->second;
+                return std::string{ pixelShaderPreset->second };
             }
-            
+
             wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
                                                  GENERIC_READ,
                                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -89,23 +90,23 @@ namespace
             const auto fileSize = GetFileSize(hFile.get(), nullptr);
             THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
 
-            auto utf8buffer = std::make_unique<char[]>(fileSize);
+            auto utf8buffer = std::vector<char>(fileSize);
 
             DWORD bytesRead = 0;
-            THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.get(), fileSize, &bytesRead, nullptr));
+            THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
 
             // convert buffer to UTF-8 string
-            std::string utf8string(utf8buffer.get(), fileSize);
+            std::string utf8string(utf8buffer.data(), fileSize);
 
             return utf8string;
         }
-        catch(...)
+        catch (...)
         {
             // If we ran into any problems during loading pixel shader let's revert to
             //  the error pixel shader which should "always" be able to load and indicates
             //  to the user something went wrong
             LOG_CAUGHT_EXCEPTION();
-            return errorPixelShaderString;
+            return std::string{ std::string_view{ errorPixelShaderString } };
         }
     }
 }
@@ -139,7 +140,7 @@ DxEngine::DxEngine() :
     _swapChainDesc{ 0 },
     _swapChainFrameLatencyWaitableObject{ INVALID_HANDLE_VALUE },
     _recreateDeviceRequested{ false },
-    _pixelShaderEffect{ },
+    _pixelShaderEffect{},
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
@@ -321,7 +322,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
     {
         pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
     }
-    catch(...)
+    catch (...)
     {
         LOG_CAUGHT_EXCEPTION();
         pixelBlob = _CompileShader(errorPixelShaderString, "ps_5_0");
@@ -406,19 +407,19 @@ void DxEngine::_ComputePixelShaderSettings() noexcept
         try
         {
             // Set the time
-            //  TODO: Grab timestamp 
+            //  TODO: Grab timestamp
             _pixelShaderSettings.Time = 0.0f;
 
             // Set the UI Scale
             _pixelShaderSettings.Scale = _scale;
 
             // Set the display resolution
-            float w = 1.0f*_displaySizePixels.width<UINT>();
-            float h = 1.0f*_displaySizePixels.height<UINT>();
-            _pixelShaderSettings.Resolution = XMFLOAT2 { w, h };
+            const float w = 1.0f * _displaySizePixels.width<UINT>();
+            const float h = 1.0f * _displaySizePixels.height<UINT>();
+            _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
 
             // Set the background
-            DirectX::XMFLOAT4 background {};
+            DirectX::XMFLOAT4 background{};
             background.x = _backgroundColor.r;
             background.y = _backgroundColor.g;
             background.z = _backgroundColor.b;

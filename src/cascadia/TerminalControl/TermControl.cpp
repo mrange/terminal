@@ -320,7 +320,7 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
     {
         auto lock = _terminal->LockForWriting();
         // TODO: Implement toggle pixel shader effect
-//        _renderEngine->SetPixelShaderEffect(!_renderEngine->GetPixelShaderEffect());
+        //        _renderEngine->SetPixelShaderEffect(!_renderEngine->GetPixelShaderEffect());
     }
 
     // Method Description:
