@@ -365,7 +365,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
 // Routine Description:
 // - Puts the correct values in _pixelShaderSettings, so the struct can be
-//   passed the GPU.
+//   passed the GPU and updates the GPU resource.
 // Arguments:
 // - <none>
 // Return Value:
@@ -376,15 +376,25 @@ void DxEngine::_ComputePixelShaderSettings() noexcept
     {
         try
         {
-            // Retro scan lines alternate evolution
-            _pixelShaderSettings.Downscale = _scale * 2.0f;
+            // Set the time
+            //  TODO: Grab timestamp 
+            _pixelShaderSettings.Time = 0.0f;
+
+            // Set the UI Scale
+            _pixelShaderSettings.Scale = _scale;
 
             // Set the display resolution
-            _pixelShaderSettings.Width = 1.0f*_displaySizePixels.width<UINT>();
-            _pixelShaderSettings.Height = 1.0f*_displaySizePixels.height<UINT>();
+            float w = 1.0f*_displaySizePixels.width<UINT>();
+            float h = 1.0f*_displaySizePixels.height<UINT>();
+            _pixelShaderSettings.Resolution = XMFLOAT2 { w, h };
 
             // Set the background
-            _pixelShaderSettings.Background = _backgroundColor;
+            DirectX::XMFLOAT4 background {};
+            background.x = _backgroundColor.r;
+            background.y = _backgroundColor.g;
+            background.z = _backgroundColor.b;
+            background.w = _backgroundColor.a;
+            _pixelShaderSettings.Background = background;
 
             _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
         }

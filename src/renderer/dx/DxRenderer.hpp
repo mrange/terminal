@@ -15,6 +15,7 @@
 #include <d2d1.h>
 #include <d2d1_1.h>
 #include <d2d1helper.h>
+#include <DirectXMath.h>
 #include <dwrite.h>
 #include <dwrite_1.h>
 #include <dwrite_2.h>
@@ -221,10 +222,10 @@ namespace Microsoft::Console::Render
         // DirectX constant buffers need to be a multiple of 16; align to pad the size.
         __declspec(align(16)) struct
         {
-            float Downscale;
-            float Width;
-            float Height;
-            D2D1_COLOR_F Background;
+            float Time;
+            float Scale;
+            DirectX::XMFLOAT2 Resolution;
+            DirectX::XMFLOAT4 Background;
 #pragma warning(suppress : 4324) // structure was padded due to __declspec(align())
         } _pixelShaderSettings;
 

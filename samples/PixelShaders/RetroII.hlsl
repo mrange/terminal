@@ -6,7 +6,7 @@
 #define DOWNSCALE   3.0
 #define MAIN        ps_main
 #else
-#define DOWNSCALE   Downscale
+#define DOWNSCALE   (2.0*Scale)
 #define MAIN        main
 #endif
 
@@ -17,22 +17,14 @@ Texture2D shaderTexture;
 SamplerState samplerState;
 
 cbuffer PixelShaderSettings {
-  float Downscale;
-#ifdef KODELIFE
+  float  Time;
+  float  Scale;
   float2 Resolution;
-#else
-  float Width;
-  float Height;
-#endif
-  float4 Background;    // abgr
+  float4 Background;
 };
 
 float2 resolution() {
-#ifdef KODELIFE
   return Resolution;
-#else
-  return float2(Width, Height);
-#endif
 }
 
 // HSV to RGB conversion
@@ -76,7 +68,7 @@ float psin(float a) {
 float3 sampleHSV(float2 p) {
   float2 cp = abs(p - 0.5);
   float4 s = shaderTexture.Sample(samplerState, p);
-  float3 col = lerp(Background.wzy, s.xyz, s.w);
+  float3 col = lerp(Background.xyz, s.xyz, s.w);
   return rgb2hsv(col)*step(cp.x, 0.5)*step(cp.y, 0.5);
 }
 
