@@ -56,8 +56,8 @@ namespace Microsoft::Console::Render
 
         void SetCallback(std::function<void()> pfn);
 
-        bool GetRetroTerminalEffects() const noexcept;
-        void SetRetroTerminalEffects(bool enable) noexcept;
+        std::optional<std::wstring> GetPixelShaderEffect() const noexcept;
+        void SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept;
 
         void SetForceFullRepaintRendering(bool enable) noexcept;
 
@@ -200,7 +200,7 @@ namespace Microsoft::Console::Render
         std::unique_ptr<DrawingContext> _drawingContext;
 
         // Terminal effects resources.
-        bool _retroTerminalEffects;
+        std::optional<std::wstring> _pixelShaderEffect;
         ::Microsoft::WRL::ComPtr<ID3D11RenderTargetView> _renderTargetView;
         ::Microsoft::WRL::ComPtr<ID3D11VertexShader> _vertexShader;
         ::Microsoft::WRL::ComPtr<ID3D11PixelShader> _pixelShader;

@@ -87,7 +87,7 @@ DxEngine::DxEngine() :
     _swapChainDesc{ 0 },
     _swapChainFrameLatencyWaitableObject{ INVALID_HANDLE_VALUE },
     _recreateDeviceRequested{ false },
-    _retroTerminalEffects{ false },
+    _pixelShaderEffect{ },
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
@@ -341,20 +341,20 @@ HRESULT DxEngine::_SetupTerminalEffects()
 // - <none>
 void DxEngine::_ComputePixelShaderSettings() noexcept
 {
-    if (_retroTerminalEffects && _d3dDeviceContext && _pixelShaderSettingsBuffer)
+    if (_pixelShaderEffect && _d3dDeviceContext && _pixelShaderSettingsBuffer)
     {
-        // Retro scan lines alternate evolution
-        _pixelShaderSettings.Downscale = _scale * 2.0f;
-
-        // Set the display resolution
-        _pixelShaderSettings.Width = 1.0f*_displaySizePixels.width<UINT>();
-        _pixelShaderSettings.Height = 1.0f*_displaySizePixels.height<UINT>();
-
-        // Set the background
-        _pixelShaderSettings.Background = _backgroundColor;
-
         try
         {
+            // Retro scan lines alternate evolution
+            _pixelShaderSettings.Downscale = _scale * 2.0f;
+
+            // Set the display resolution
+            _pixelShaderSettings.Width = 1.0f*_displaySizePixels.width<UINT>();
+            _pixelShaderSettings.Height = 1.0f*_displaySizePixels.height<UINT>();
+
+            // Set the background
+            _pixelShaderSettings.Background = _backgroundColor;
+
             _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
         }
         CATCH_LOG();
@@ -534,12 +534,12 @@ try
             }
         }
 
-        if (_retroTerminalEffects)
+        if (_pixelShaderEffect)
         {
             const HRESULT hr = _SetupTerminalEffects();
             if (FAILED(hr))
             {
-                _retroTerminalEffects = false;
+                _pixelShaderEffect.reset();
                 LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
             }
         }
@@ -799,17 +799,17 @@ void DxEngine::SetCallback(std::function<void()> pfn)
     _pfn = pfn;
 }
 
-bool DxEngine::GetRetroTerminalEffects() const noexcept
+std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const noexcept
 {
-    return _retroTerminalEffects;
+    return _pixelShaderEffect;
 }
 
-void DxEngine::SetRetroTerminalEffects(bool enable) noexcept
+void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
 try
 {
-    if (_retroTerminalEffects != enable)
+    if (_pixelShaderEffect != value)
     {
-        _retroTerminalEffects = enable;
+        _pixelShaderEffect = value;
         _recreateDeviceRequested = true;
         LOG_IF_FAILED(InvalidateAll());
     }
@@ -1085,11 +1085,11 @@ try
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
     //
-    // If retro terminal effects are on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of retro terminal effects.
+    // If pixel shader effect is on, we must invalidate everything for them to draw correctly.
+    // Yes, this will further impact the performance of pixel shader effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
-    if (_forceFullRepaintRendering || _retroTerminalEffects)
+    if (_forceFullRepaintRendering || _pixelShaderEffect)
     {
         _invalidMap.set_all();
     }
@@ -1309,12 +1309,12 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
-        if (_retroTerminalEffects)
+        if (_pixelShaderEffect)
         {
             const HRESULT hr2 = _PaintTerminalEffects();
             if (FAILED(hr2))
             {
-                _retroTerminalEffects = false;
+                _pixelShaderEffect.reset();
                 LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
             }
         }
