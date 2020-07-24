@@ -226,7 +226,8 @@ TerminalSettings Profile::CreateTerminalSettings(const std::unordered_map<std::w
 
     terminalSettings.AntialiasingMode(_antialiasingMode);
 
-    terminalSettings.PixelShaderEffect(_pixelShaderEffect.value());
+    auto pixelShaderEffect = _pixelShaderEffect ? _pixelShaderEffect.value() : std::wstring();
+    terminalSettings.PixelShaderEffect(pixelShaderEffect);
 
     return terminalSettings;
 }

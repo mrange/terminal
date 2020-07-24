@@ -1,4 +1,5 @@
-// In order to run in KodeLife (great Shader IDE and free with some nagging), define the following:
+// In order to run in KodeLife (great Shader IDE and free with some nagging),
+//  define the following:
 // #define KODELIFE
 
 #ifdef KODELIFE

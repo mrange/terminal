@@ -58,6 +58,36 @@ static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 using namespace Microsoft::Console::Render;
 using namespace Microsoft::Console::Types;
 
+namespace
+{
+    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
+    {
+        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                             GENERIC_READ,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                             nullptr,
+                                             OPEN_EXISTING,
+                                             FILE_ATTRIBUTE_NORMAL,
+                                             nullptr) };
+
+        THROW_LAST_ERROR_IF(!hFile);
+
+        // fileSize is in bytes
+        const auto fileSize = GetFileSize(hFile.get(), nullptr);
+        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+
+        auto utf8buffer = std::make_unique<char[]>(fileSize);
+
+        DWORD bytesRead = 0;
+        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.get(), fileSize, &bytesRead, nullptr));
+
+        // convert buffer to UTF-8 string
+        std::string utf8string(utf8buffer.get(), fileSize);
+
+        return utf8string;
+    }
+}
+
 // Routine Description:
 // - Constructs a DirectX-based renderer for console text
 //   which primarily uses DirectWrite on a Direct2D surface
@@ -236,6 +266,7 @@ _CompileShader(
 // - HRESULT status.
 HRESULT DxEngine::_SetupTerminalEffects()
 {
+    auto pixelShaderSource = _LoadPixelShaderEffect(_pixelShaderEffect.value());
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
 
@@ -260,7 +291,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
     // Prepare shaders.
     auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
-    auto pixelBlob = _CompileShader(screenPixelShaderString, "ps_5_0");
+    auto pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
     // TODO:GH#3928 move the shader files to to hlsl files and package their
     // build output to UWP app and load with these.
     // ::Microsoft::WRL::ComPtr<ID3DBlob> vertexBlob, pixelBlob;
