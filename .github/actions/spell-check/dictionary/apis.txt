@@ -6,6 +6,7 @@ bitfields
 CLASSNOTAVAILABLE
 EXPCMDFLAGS
 EXPCMDSTATE
+frac
 fullkbd
 futex
 href
@@ -21,8 +22,8 @@ IExplorer
 IMap
 IObject
 IStorage
-llabs
 LCID
+llabs
 LSHIFT
 NCHITTEST
 NCLBUTTONDBLCLK

@@ -625,6 +625,7 @@ doskey
 dotnet
 doubleclick
 downlevel
+DOWNSCALE
 dpg
 dpi
 DPIAPI
@@ -832,6 +833,7 @@ fuzzwrapper
 fwdecl
 fwe
 fwlink
+GAUSSIAN
 gb
 gci
 gcx
@@ -1067,6 +1069,7 @@ IInteract
 IInteractivity
 IIo
 IList
+imagemagick
 ime
 Imm
 IMouse
@@ -1083,7 +1086,6 @@ INITCOMMONCONTROLSEX
 INITDIALOG
 initguid
 INITMENU
-imagemagick
 inkscape
 inl
 INLINEPREFIX
@@ -1203,6 +1205,7 @@ KJ
 KLF
 KLMNOPQRST
 KLMNOPQRSTQQQQQ
+Kode
 KU
 KVM
 KX
@@ -1532,8 +1535,8 @@ nothrow
 NOTICKS
 NOTIMPL
 notin
-NOTOPMOST
 NOTNULL
+NOTOPMOST
 NOTRACK
 NOTSUPPORTED
 notypeopt
@@ -1623,8 +1626,8 @@ OSCBG
 OSCCT
 OSCFG
 OSCRCC
-OSCSCC
 OSCSCB
+OSCSCC
 OSCWT
 OSDEPENDSROOT
 osfhandle
@@ -1785,6 +1788,7 @@ pragma
 prc
 prealigned
 prebuilt
+precendence
 precomp
 prect
 prefast
@@ -1828,6 +1832,7 @@ pshn
 PSHNOTIFY
 PSHORT
 pshpack
+psin
 PSINGLE
 psl
 psldl
@@ -1951,9 +1956,11 @@ RESETCONTENT
 resheader
 resizable
 resmimetype
+reso
 restrictedcapabilities
 resw
 resx
+RETROII
 retval
 rfa
 rfc
@@ -2024,6 +2031,7 @@ SBCSDBCS
 sbi
 sbiex
 sbold
+scanbri
 scancode
 scanline
 schemename
@@ -2130,6 +2138,7 @@ SHOWNOACTIVATE
 SHOWNORMAL
 SHOWWINDOW
 SHRT
+shsv
 sid
 sidebyside
 SIF
@@ -2163,6 +2172,9 @@ SOURCESDIRECTORY
 SPACEBAR
 spammy
 spand
+spe
+sph
+spherefunctions
 splashscreen
 sprintf
 sqlproj
@@ -2537,6 +2549,7 @@ vga
 vgaoem
 viewkind
 viewports
+Viginetting
 Virt
 VIRTTERM
 Virtualizing
@@ -2752,6 +2765,7 @@ wwaproj
 WWith
 wx
 wxh
+wz
 xa
 xab
 xact
@@ -2803,6 +2817,7 @@ xvalue
 XVIRTUALSCREEN
 XWalk
 xy
+xyw
 yact
 YAML
 YCast
@@ -2818,6 +2833,7 @@ YVIRTUALSCREEN
 Yw
 YWalk
 yx
+yzx
 Zc
 ZCmd
 ZCtrl
