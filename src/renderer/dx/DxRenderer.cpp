@@ -60,10 +60,21 @@ using namespace Microsoft::Console::Types;
 
 namespace
 {
-    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
+    const std::map<std::wstring, std::string> pixelShaderPresets = {
+        { L"RETRO"   , retroPixelShaderString    },
+        { L"RETROII" , retroIIPixelShaderString  },
+    };
+    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect) noexcept
     {
         try
         {
+            auto pixelShaderPreset = pixelShaderPresets.find(pixelShaderEffect);
+
+            if (pixelShaderPreset != pixelShaderPresets.end())
+            {
+              return pixelShaderPreset->second;
+            }
+            
             wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
                                                  GENERIC_READ,
                                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
