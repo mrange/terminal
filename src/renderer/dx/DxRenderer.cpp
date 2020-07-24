@@ -62,29 +62,40 @@ namespace
 {
     std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
     {
-        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
-                                             GENERIC_READ,
-                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                             nullptr,
-                                             OPEN_EXISTING,
-                                             FILE_ATTRIBUTE_NORMAL,
-                                             nullptr) };
+        try
+        {
+            wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                                 GENERIC_READ,
+                                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                 nullptr,
+                                                 OPEN_EXISTING,
+                                                 FILE_ATTRIBUTE_NORMAL,
+                                                 nullptr) };
 
-        THROW_LAST_ERROR_IF(!hFile);
+            THROW_LAST_ERROR_IF(!hFile);
 
-        // fileSize is in bytes
-        const auto fileSize = GetFileSize(hFile.get(), nullptr);
-        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+            // fileSize is in bytes
+            const auto fileSize = GetFileSize(hFile.get(), nullptr);
+            THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
 
-        auto utf8buffer = std::make_unique<char[]>(fileSize);
+            auto utf8buffer = std::make_unique<char[]>(fileSize);
 
-        DWORD bytesRead = 0;
-        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.get(), fileSize, &bytesRead, nullptr));
+            DWORD bytesRead = 0;
+            THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.get(), fileSize, &bytesRead, nullptr));
 
-        // convert buffer to UTF-8 string
-        std::string utf8string(utf8buffer.get(), fileSize);
+            // convert buffer to UTF-8 string
+            std::string utf8string(utf8buffer.get(), fileSize);
 
-        return utf8string;
+            return utf8string;
+        }
+        catch(...)
+        {
+            // If we ran into any problems during loading pixel shader let's revert to
+            //  the error pixel shader which should "always" be able to load and indicates
+            //  to the user something went wrong
+            LOG_CAUGHT_EXCEPTION();
+            return errorPixelShaderString;
+        }
     }
 }
 
@@ -291,12 +302,19 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
     // Prepare shaders.
     auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
-    auto pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
-    // TODO:GH#3928 move the shader files to to hlsl files and package their
-    // build output to UWP app and load with these.
-    // ::Microsoft::WRL::ComPtr<ID3DBlob> vertexBlob, pixelBlob;
-    // RETURN_IF_FAILED(D3DReadFileToBlob(L"ScreenVertexShader.cso", &vertexBlob));
-    // RETURN_IF_FAILED(D3DReadFileToBlob(L"ScreenPixelShader.cso", &pixelBlob));
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
+    // As the pixel shader source is user provided it's possible there's a problem with it
+    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
+    //  If even the error pixel shader fails to load rely on standard exception handling
+    try
+    {
+        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
+    }
+    catch(...)
+    {
+        LOG_CAUGHT_EXCEPTION();
+        pixelBlob = _CompileShader(errorPixelShaderString, "ps_5_0");
+    }
 
     RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
         vertexBlob->GetBufferPointer(),

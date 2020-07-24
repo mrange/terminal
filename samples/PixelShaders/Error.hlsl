@@ -1,9 +1,3 @@
-#pragma once
-
-#ifdef __INSIDE_WINDOWS
-const char errorPixelShaderString[] = "";
-#else
-const char errorPixelShaderString[] = R"(
 // Shader used to indicate something went wrong during shader loading
 Texture2D shaderTexture;
 SamplerState samplerState;
@@ -22,5 +16,3 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET
     color.x += pow(bars, 20.0);
     return color;
 }
-)";
-#endif
