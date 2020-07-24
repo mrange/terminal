@@ -55,61 +55,17 @@ static constexpr float POINTS_PER_INCH = 72.0f;
 static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Lucida Console", L"Courier New" };
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 
+static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
+static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
+static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
+#pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
+static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
+    { L"RETRO", RETRO_PIXEL_SHADER },
+    { L"RETROII", RETROII_PIXEL_SHADER },
+};
+
 using namespace Microsoft::Console::Render;
 using namespace Microsoft::Console::Types;
-
-namespace
-{
-    const std::map<std::wstring_view, std::string_view> pixelShaderPresets = {
-        { L"RETRO", retroPixelShaderString },
-        { L"RETROII", retroIIPixelShaderString },
-    };
-
-    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
-    {
-        try
-        {
-            const auto pixelShaderPreset = pixelShaderPresets.find(pixelShaderEffect);
-
-            if (pixelShaderPreset != pixelShaderPresets.end())
-            {
-                return std::string{ pixelShaderPreset->second };
-            }
-
-            wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
-                                                 GENERIC_READ,
-                                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                                 nullptr,
-                                                 OPEN_EXISTING,
-                                                 FILE_ATTRIBUTE_NORMAL,
-                                                 nullptr) };
-
-            THROW_LAST_ERROR_IF(!hFile);
-
-            // fileSize is in bytes
-            const auto fileSize = GetFileSize(hFile.get(), nullptr);
-            THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
-
-            auto utf8buffer = std::vector<char>(fileSize);
-
-            DWORD bytesRead = 0;
-            THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
-
-            // convert buffer to UTF-8 string
-            std::string utf8string(utf8buffer.data(), fileSize);
-
-            return utf8string;
-        }
-        catch (...)
-        {
-            // If we ran into any problems during loading pixel shader let's revert to
-            //  the error pixel shader which should "always" be able to load and indicates
-            //  to the user something went wrong
-            LOG_CAUGHT_EXCEPTION();
-            return std::string{ std::string_view{ errorPixelShaderString } };
-        }
-    }
-}
 
 // Routine Description:
 // - Constructs a DirectX-based renderer for console text
@@ -140,6 +96,8 @@ DxEngine::DxEngine() :
     _swapChainDesc{ 0 },
     _swapChainFrameLatencyWaitableObject{ INVALID_HANDLE_VALUE },
     _recreateDeviceRequested{ false },
+    _terminalEffectsEnabled{ false },
+    _retroTerminalEffect{ false },
     _pixelShaderEffect{},
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
@@ -283,13 +241,111 @@ _CompileShader(
 }
 
 // Routine Description:
+// - Checks if terminal effects are enabled
+// Arguments:
+// Return Value:
+// - True if terminal effects are enabled
+bool DxEngine::_HasTerminalEffects() const noexcept
+{
+    return _terminalEffectsEnabled && (_retroTerminalEffect || _pixelShaderEffect);
+}
+
+// Routine Description:
+// - Disable terminal effects
+// Arguments:
+// Return Value:
+// - Void
+void DxEngine::_DisableTerminalEffects() noexcept
+{
+    _terminalEffectsEnabled = false;
+    _retroTerminalEffect = false;
+    _pixelShaderEffect.reset();
+}
+
+// Routine Description:
+// - Toggles terminal effects off and on. If no terminal effect is configured has no effect
+// Arguments:
+// Return Value:
+// - Void
+void DxEngine::ToggleTerminalEffects()
+{
+    _terminalEffectsEnabled = !_terminalEffectsEnabled;
+    LOG_IF_FAILED(InvalidateAll());
+}
+
+// Routine Description:
+// - Loads pixel shader source depending on _retroTerminalEffect and _pixelShaderEffect
+// Arguments:
+// Return Value:
+// - Pixel shader source code
+std::string DxEngine::_LoadPixelShaderEffect() const
+{
+    try
+    {
+        // If the user specified the legacy option retroTerminalEffect it has precendence
+        if (_retroTerminalEffect)
+        {
+            return std::string{ RETRO_PIXEL_SHADER };
+        }
+
+        // If no pixel shader effect is specified this function shouldn't end up being called.
+        //  If it happens anyway return the error shader
+        if (!_pixelShaderEffect)
+        {
+            return std::string{ ERROR_PIXEL_SHADER };
+        }
+
+        auto pixelShaderEffect = *_pixelShaderEffect;
+
+        const auto pixelShaderPreset = PIXEL_SHADER_PRESETS.find(pixelShaderEffect);
+
+        if (pixelShaderPreset != PIXEL_SHADER_PRESETS.end())
+        {
+            return std::string{ pixelShaderPreset->second };
+        }
+
+        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                             GENERIC_READ,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                             nullptr,
+                                             OPEN_EXISTING,
+                                             FILE_ATTRIBUTE_NORMAL,
+                                             nullptr) };
+
+        THROW_LAST_ERROR_IF(!hFile);
+
+        // fileSize is in bytes
+        const auto fileSize = GetFileSize(hFile.get(), nullptr);
+        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+
+        auto utf8buffer = std::vector<char>(fileSize);
+
+        DWORD bytesRead = 0;
+        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
+
+        // convert buffer to UTF-8 string
+        std::string utf8string(utf8buffer.data(), fileSize);
+
+        return utf8string;
+    }
+    catch (...)
+    {
+        // If we ran into any problems during loading pixel shader let's revert to
+        //  the error pixel shader which should "always" be able to load and indicates
+        //  to the user something went wrong
+        LOG_CAUGHT_EXCEPTION();
+        return std::string{ ERROR_PIXEL_SHADER };
+    }
+}
+
+// Routine Description:
 // - Setup D3D objects for doing shader things for terminal effects.
 // Arguments:
 // Return Value:
 // - HRESULT status.
 HRESULT DxEngine::_SetupTerminalEffects()
 {
-    auto pixelShaderSource = _LoadPixelShaderEffect(_pixelShaderEffect.value());
+    auto pixelShaderSource = _LoadPixelShaderEffect();
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
 
@@ -325,7 +381,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
     catch (...)
     {
         LOG_CAUGHT_EXCEPTION();
-        pixelBlob = _CompileShader(errorPixelShaderString, "ps_5_0");
+        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
     }
 
     RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
@@ -402,12 +458,12 @@ HRESULT DxEngine::_SetupTerminalEffects()
 // - <none>
 void DxEngine::_ComputePixelShaderSettings() noexcept
 {
-    if (_pixelShaderEffect && _d3dDeviceContext && _pixelShaderSettingsBuffer)
+    if (_HasTerminalEffects() && _d3dDeviceContext && _pixelShaderSettingsBuffer)
     {
         try
         {
             // Set the time
-            //  TODO: Grab timestamp
+            //  TODO:GH#7013 Grab timestamp
             _pixelShaderSettings.Time = 0.0f;
 
             // Set the UI Scale
@@ -605,12 +661,12 @@ try
             }
         }
 
-        if (_pixelShaderEffect)
+        if (_HasTerminalEffects())
         {
             const HRESULT hr = _SetupTerminalEffects();
             if (FAILED(hr))
             {
-                _pixelShaderEffect.reset();
+                _DisableTerminalEffects();
                 LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
             }
         }
@@ -870,7 +926,25 @@ void DxEngine::SetCallback(std::function<void()> pfn)
     _pfn = pfn;
 }
 
-std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const noexcept
+bool DxEngine::GetRetroTerminalEffect() const noexcept
+{
+    return _retroTerminalEffect;
+}
+
+void DxEngine::SetRetroTerminalEffect(bool enable) noexcept
+try
+{
+    if (_retroTerminalEffect != enable)
+    {
+        _terminalEffectsEnabled = true;
+        _retroTerminalEffect = enable;
+        _recreateDeviceRequested = true;
+        LOG_IF_FAILED(InvalidateAll());
+    }
+}
+CATCH_LOG()
+
+std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const
 {
     return _pixelShaderEffect;
 }
@@ -880,6 +954,7 @@ try
 {
     if (_pixelShaderEffect != value)
     {
+        _terminalEffectsEnabled = true;
         _pixelShaderEffect = value;
         _recreateDeviceRequested = true;
         LOG_IF_FAILED(InvalidateAll());
@@ -1156,11 +1231,11 @@ try
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
     //
-    // If pixel shader effect is on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of pixel shader effects.
+    // If terminal effects are on, we must invalidate everything for them to draw correctly.
+    // Yes, this will further impact the performance of terminal effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
-    if (_forceFullRepaintRendering || _pixelShaderEffect)
+    if (_forceFullRepaintRendering || _HasTerminalEffects())
     {
         _invalidMap.set_all();
     }
@@ -1380,12 +1455,12 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
-        if (_pixelShaderEffect)
+        if (_HasTerminalEffects())
         {
             const HRESULT hr2 = _PaintTerminalEffects();
             if (FAILED(hr2))
             {
-                _pixelShaderEffect.reset();
+                _DisableTerminalEffects();
                 LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
             }
         }

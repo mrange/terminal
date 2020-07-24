@@ -50,6 +50,7 @@ static constexpr std::string_view BackgroundImageKey{ "backgroundImage" };
 static constexpr std::string_view BackgroundImageOpacityKey{ "backgroundImageOpacity" };
 static constexpr std::string_view BackgroundImageStretchModeKey{ "backgroundImageStretchMode" };
 static constexpr std::string_view BackgroundImageAlignmentKey{ "backgroundImageAlignment" };
+static constexpr std::string_view RetroTerminalEffectKey{ "experimental.retroTerminalEffect" };
 static constexpr std::string_view AntialiasingModeKey{ "antialiasingMode" };
 static constexpr std::string_view PixelShaderEffectKey{ "experimental.pixelShaderEffect" };
 
@@ -92,6 +93,7 @@ Profile::Profile(const std::optional<GUID>& guid) :
     _backgroundImageOpacity{},
     _backgroundImageStretchMode{},
     _backgroundImageAlignment{},
+    _retroTerminalEffect{},
     _antialiasingMode{ TextAntialiasingMode::Grayscale },
     _pixelShaderEffect{}
 {
@@ -222,6 +224,11 @@ TerminalSettings Profile::CreateTerminalSettings(const std::unordered_map<std::w
         const auto imageVerticalAlignment = std::get<VerticalAlignment>(_backgroundImageAlignment.value());
         terminalSettings.BackgroundImageHorizontalAlignment(imageHorizontalAlignment);
         terminalSettings.BackgroundImageVerticalAlignment(imageVerticalAlignment);
+    }
+
+    if (_retroTerminalEffect)
+    {
+        terminalSettings.RetroTerminalEffect(_retroTerminalEffect.value());
     }
 
     terminalSettings.AntialiasingMode(_antialiasingMode);
@@ -400,6 +407,7 @@ void Profile::LayerJson(const Json::Value& json)
     JsonUtils::GetValueForKey(json, BackgroundImageOpacityKey, _backgroundImageOpacity);
     JsonUtils::GetValueForKey(json, BackgroundImageStretchModeKey, _backgroundImageStretchMode);
     JsonUtils::GetValueForKey(json, BackgroundImageAlignmentKey, _backgroundImageAlignment);
+    JsonUtils::GetValueForKey(json, RetroTerminalEffectKey, _retroTerminalEffect);
     JsonUtils::GetValueForKey(json, AntialiasingModeKey, _antialiasingMode);
     JsonUtils::GetValueForKey(json, PixelShaderEffectKey, _pixelShaderEffect);
 }
@@ -709,7 +717,12 @@ GUID Profile::GetGuidOrGenerateForJson(const Json::Value& json) noexcept
     return Profile::_GenerateGuidForProfile(name, source);
 }
 
-void Profile::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
+void Profile::SetRetroTerminalEffect(bool value) noexcept
+{
+    _retroTerminalEffect = value;
+}
+
+void Profile::SetPixelShaderEffect(const std::optional<std::wstring>& value)
 {
     _pixelShaderEffect = value;
 }
