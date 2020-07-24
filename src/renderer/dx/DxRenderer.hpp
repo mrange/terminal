@@ -63,7 +63,7 @@ namespace Microsoft::Console::Render
         void SetRetroTerminalEffect(bool enable) noexcept;
 
         std::optional<std::wstring> GetPixelShaderEffect() const;
-        void SetPixelShaderEffect(const std::optional<std::wstring>& value);
+        void SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept;
 
         void SetForceFullRepaintRendering(bool enable) noexcept;
 

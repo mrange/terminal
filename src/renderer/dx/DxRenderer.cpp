@@ -54,7 +54,7 @@ D3D11_INPUT_ELEMENT_DESC _shaderInputLayout[] = {
 static constexpr float POINTS_PER_INCH = 72.0f;
 static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Lucida Console", L"Courier New" };
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
-const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS = {
+static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS = {
     { L"RETRO", retroPixelShaderString },
     { L"RETROII", retroIIPixelShaderString },
 };
@@ -458,7 +458,7 @@ void DxEngine::_ComputePixelShaderSettings() noexcept
         try
         {
             // Set the time
-            //  TODO: Grab timestamp
+            //  TODO:GH#7013 Grab timestamp
             _pixelShaderSettings.Time = 0.0f;
 
             // Set the UI Scale
@@ -944,7 +944,7 @@ std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const
     return _pixelShaderEffect;
 }
 
-void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value)
+void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
 try
 {
     if (_pixelShaderEffect != value)
@@ -1226,8 +1226,8 @@ try
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
     //
-    // If pixel shader effect is on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of pixel shader effects.
+    // If terminal effects are on, we must invalidate everything for them to draw correctly.
+    // Yes, this will further impact the performance of terminal effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
     if (_forceFullRepaintRendering || _HasTerminalEffects())

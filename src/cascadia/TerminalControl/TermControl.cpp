@@ -35,22 +35,18 @@ constexpr const auto ScrollBarUpdateInterval = std::chrono::milliseconds(8);
 // The minimum delay between updating the TSF input control.
 constexpr const auto TsfRedrawInterval = std::chrono::milliseconds(100);
 
-namespace
+// TODO:GH#7013 Is there already an existing implementation for this?
+static std::optional<std::wstring> _HStringToOptionalString(const winrt::hstring& s)
 {
-    // TODO: Is there already an existing implementation for this?
-    std::optional<std::wstring> _HStringToOptionalString(const winrt::hstring& s)
+    std::wstring_view v = s;
+    if (v.empty())
     {
-        std::wstring_view v = s;
-        if (v.empty())
-        {
-            return std::nullopt;
-        }
-        else
-        {
-            return std::wstring(v);
-        }
+        return std::nullopt;
     }
-
+    else
+    {
+        return std::wstring(v);
+    }
 }
 
 namespace winrt::Microsoft::Terminal::TerminalControl::implementation
