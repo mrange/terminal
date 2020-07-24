@@ -32,6 +32,7 @@ static constexpr std::string_view ResizePaneKey{ "resizePane" };
 static constexpr std::string_view MoveFocusKey{ "moveFocus" };
 static constexpr std::string_view FindKey{ "find" };
 static constexpr std::string_view ToggleRetroEffectKey{ "toggleRetroEffect" };
+static constexpr std::string_view ToggleTerminalEffectsKey{ "toggleTerminalEffects" };
 static constexpr std::string_view ToggleFocusModeKey{ "toggleFocusMode" };
 static constexpr std::string_view ToggleFullscreenKey{ "toggleFullscreen" };
 static constexpr std::string_view ToggleAlwaysOnTopKey{ "toggleAlwaysOnTop" };
@@ -81,6 +82,7 @@ namespace winrt::TerminalApp::implementation
         { MoveFocusKey, ShortcutAction::MoveFocus },
         { OpenSettingsKey, ShortcutAction::OpenSettings },
         { ToggleRetroEffectKey, ShortcutAction::ToggleRetroEffect },
+        { ToggleTerminalEffectsKey, ShortcutAction::ToggleTerminalEffects },
         { ToggleFocusModeKey, ShortcutAction::ToggleFocusMode },
         { ToggleFullscreenKey, ShortcutAction::ToggleFullscreen },
         { ToggleAlwaysOnTopKey, ShortcutAction::ToggleAlwaysOnTop },
@@ -263,6 +265,7 @@ namespace winrt::TerminalApp::implementation
                 { ShortcutAction::MoveFocus, RS_(L"MoveFocusCommandKey") },
                 { ShortcutAction::OpenSettings, RS_(L"OpenSettingsCommandKey") },
                 { ShortcutAction::ToggleRetroEffect, RS_(L"ToggleRetroEffectCommandKey") },
+                { ShortcutAction::ToggleTerminalEffects, RS_(L"ToggleTerminalEffectsCommandKey") },
                 { ShortcutAction::ToggleFocusMode, RS_(L"ToggleFocusModeCommandKey") },
                 { ShortcutAction::ToggleFullscreen, RS_(L"ToggleFullscreenCommandKey") },
                 { ShortcutAction::ToggleAlwaysOnTop, RS_(L"ToggleAlwaysOnTopCommandKey") },

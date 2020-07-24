@@ -40,7 +40,8 @@ namespace TerminalApp
         OpenTabColorPicker,
         RenameTab,
         ExecuteCommandline,
-        ToggleCommandPalette
+        ToggleCommandPalette,
+        ToggleTerminalEffects
     };
 
     [default_interface] runtimeclass ActionAndArgs {
@@ -78,6 +79,7 @@ namespace TerminalApp
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> Find;
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> MoveFocus;
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> ToggleRetroEffect;
+        event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> ToggleTerminalEffects;
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> ToggleFocusMode;
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> ToggleFullscreen;
         event Windows.Foundation.TypedEventHandler<ShortcutActionDispatch, ActionEventArgs> ToggleAlwaysOnTop;

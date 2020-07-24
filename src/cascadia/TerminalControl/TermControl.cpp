@@ -288,6 +288,7 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
             // Update DxEngine settings under the lock
             _renderEngine->SetSelectionBackground(_settings.SelectionBackground());
 
+            _renderEngine->SetRetroTerminalEffect(_settings.RetroTerminalEffect());
             _renderEngine->SetPixelShaderEffect(_HStringToOptionalString(_settings.PixelShaderEffect()));
             _renderEngine->SetForceFullRepaintRendering(_settings.ForceFullRepaintRendering());
             _renderEngine->SetSoftwareRendering(_settings.SoftwareRendering());
@@ -316,11 +317,16 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
             }
         }
     }
+
     void TermControl::ToggleRetroEffect()
     {
+        ToggleTerminalEffects();
+    }
+
+    void TermControl::ToggleTerminalEffects()
+    {
         auto lock = _terminal->LockForWriting();
-        // TODO: Implement toggle pixel shader effect
-        //        _renderEngine->SetPixelShaderEffect(!_renderEngine->GetPixelShaderEffect());
+        _renderEngine->ToggleTerminalEffects();
     }
 
     // Method Description:
@@ -664,6 +670,7 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
 
             _terminal->CreateFromSettings(_settings, renderTarget);
 
+            dxEngine->SetRetroTerminalEffect(_settings.RetroTerminalEffect());
             dxEngine->SetPixelShaderEffect(_HStringToOptionalString(_settings.PixelShaderEffect()));
             dxEngine->SetForceFullRepaintRendering(_settings.ForceFullRepaintRendering());
             dxEngine->SetSoftwareRendering(_settings.SoftwareRendering());

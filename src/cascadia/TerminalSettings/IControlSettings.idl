@@ -55,6 +55,8 @@ namespace Microsoft.Terminal.Settings
 
         TextAntialiasingMode AntialiasingMode;
 
+        // Preserved for backwards compatibility
+        Boolean RetroTerminalEffect;
         Boolean ForceFullRepaintRendering;
         Boolean SoftwareRendering;
 

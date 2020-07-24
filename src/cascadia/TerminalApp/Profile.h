@@ -96,7 +96,9 @@ public:
 
     static GUID GetGuidOrGenerateForJson(const Json::Value& json) noexcept;
 
-    void SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept;
+    void SetRetroTerminalEffect(bool value) noexcept;
+
+    void SetPixelShaderEffect(const std::optional<std::wstring>& value);
 
 private:
     static std::wstring EvaluateStartingDirectory(const std::wstring& directory);
@@ -149,6 +151,8 @@ private:
     friend class TerminalAppLocalTests::ProfileTests;
     friend class TerminalAppUnitTests::JsonTests;
     friend class TerminalAppUnitTests::DynamicProfileTests;
+
+    std::optional<bool> _retroTerminalEffect;
 
     std::optional<std::wstring> _pixelShaderEffect;
 };

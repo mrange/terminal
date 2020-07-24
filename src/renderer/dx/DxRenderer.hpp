@@ -57,8 +57,13 @@ namespace Microsoft::Console::Render
 
         void SetCallback(std::function<void()> pfn);
 
-        std::optional<std::wstring> GetPixelShaderEffect() const noexcept;
-        void SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept;
+        void ToggleTerminalEffects();
+
+        bool GetRetroTerminalEffect() const noexcept;
+        void SetRetroTerminalEffect(bool enable) noexcept;
+
+        std::optional<std::wstring> GetPixelShaderEffect() const;
+        void SetPixelShaderEffect(const std::optional<std::wstring>& value);
 
         void SetForceFullRepaintRendering(bool enable) noexcept;
 
@@ -201,7 +206,21 @@ namespace Microsoft::Console::Render
         std::unique_ptr<DrawingContext> _drawingContext;
 
         // Terminal effects resources.
+
+        // Controls if configured terminal effects are enabled
+        bool _terminalEffectsEnabled;
+
+        // Experimental and deprecated retro terminal effect
+        //  Preserved for backwards compatibility
+        //  Implemented in terms of the more generic pixel shader effect
+        //  Has precendence over pixel shader effect
+        bool _retroTerminalEffect;
+
+        // Experimental and pixel shader effect
+        //  Allows user to load a pixel shader from a few presets or from a file path
         std::optional<std::wstring> _pixelShaderEffect;
+
+        // DX resources needed for terminal effects
         ::Microsoft::WRL::ComPtr<ID3D11RenderTargetView> _renderTargetView;
         ::Microsoft::WRL::ComPtr<ID3D11VertexShader> _vertexShader;
         ::Microsoft::WRL::ComPtr<ID3D11PixelShader> _pixelShader;
@@ -233,6 +252,9 @@ namespace Microsoft::Console::Render
         } _pixelShaderSettings;
 
         [[nodiscard]] HRESULT _CreateDeviceResources(const bool createSwapChain) noexcept;
+        bool _HasTerminalEffects() const noexcept;
+        void _DisableTerminalEffects() noexcept;
+        std::string _LoadPixelShaderEffect() const;
         HRESULT _SetupTerminalEffects();
         void _ComputePixelShaderSettings() noexcept;
 
