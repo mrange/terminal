@@ -58,6 +58,59 @@ static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 using namespace Microsoft::Console::Render;
 using namespace Microsoft::Console::Types;
 
+namespace
+{
+    const std::map<std::wstring_view, std::string_view> pixelShaderPresets = {
+        { L"RETRO", retroPixelShaderString },
+        { L"RETROII", retroIIPixelShaderString },
+    };
+
+    std::string _LoadPixelShaderEffect(const std::wstring& pixelShaderEffect)
+    {
+        try
+        {
+            const auto pixelShaderPreset = pixelShaderPresets.find(pixelShaderEffect);
+
+            if (pixelShaderPreset != pixelShaderPresets.end())
+            {
+                return std::string{ pixelShaderPreset->second };
+            }
+
+            wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                                 GENERIC_READ,
+                                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                 nullptr,
+                                                 OPEN_EXISTING,
+                                                 FILE_ATTRIBUTE_NORMAL,
+                                                 nullptr) };
+
+            THROW_LAST_ERROR_IF(!hFile);
+
+            // fileSize is in bytes
+            const auto fileSize = GetFileSize(hFile.get(), nullptr);
+            THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+
+            auto utf8buffer = std::vector<char>(fileSize);
+
+            DWORD bytesRead = 0;
+            THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
+
+            // convert buffer to UTF-8 string
+            std::string utf8string(utf8buffer.data(), fileSize);
+
+            return utf8string;
+        }
+        catch (...)
+        {
+            // If we ran into any problems during loading pixel shader let's revert to
+            //  the error pixel shader which should "always" be able to load and indicates
+            //  to the user something went wrong
+            LOG_CAUGHT_EXCEPTION();
+            return std::string{ std::string_view{ errorPixelShaderString } };
+        }
+    }
+}
+
 // Routine Description:
 // - Constructs a DirectX-based renderer for console text
 //   which primarily uses DirectWrite on a Direct2D surface
@@ -87,7 +140,7 @@ DxEngine::DxEngine() :
     _swapChainDesc{ 0 },
     _swapChainFrameLatencyWaitableObject{ INVALID_HANDLE_VALUE },
     _recreateDeviceRequested{ false },
-    _retroTerminalEffects{ false },
+    _pixelShaderEffect{},
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
@@ -236,6 +289,7 @@ _CompileShader(
 // - HRESULT status.
 HRESULT DxEngine::_SetupTerminalEffects()
 {
+    auto pixelShaderSource = _LoadPixelShaderEffect(_pixelShaderEffect.value());
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
 
@@ -260,12 +314,19 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
     // Prepare shaders.
     auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
-    auto pixelBlob = _CompileShader(screenPixelShaderString, "ps_5_0");
-    // TODO:GH#3928 move the shader files to to hlsl files and package their
-    // build output to UWP app and load with these.
-    // ::Microsoft::WRL::ComPtr<ID3DBlob> vertexBlob, pixelBlob;
-    // RETURN_IF_FAILED(D3DReadFileToBlob(L"ScreenVertexShader.cso", &vertexBlob));
-    // RETURN_IF_FAILED(D3DReadFileToBlob(L"ScreenPixelShader.cso", &pixelBlob));
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
+    // As the pixel shader source is user provided it's possible there's a problem with it
+    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
+    //  If even the error pixel shader fails to load rely on standard exception handling
+    try
+    {
+        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
+    }
+    catch (...)
+    {
+        LOG_CAUGHT_EXCEPTION();
+        pixelBlob = _CompileShader(errorPixelShaderString, "ps_5_0");
+    }
 
     RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
         vertexBlob->GetBufferPointer(),
@@ -334,18 +395,41 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
 // Routine Description:
 // - Puts the correct values in _pixelShaderSettings, so the struct can be
-//   passed the GPU.
+//   passed the GPU and updates the GPU resource.
 // Arguments:
 // - <none>
 // Return Value:
 // - <none>
 void DxEngine::_ComputePixelShaderSettings() noexcept
 {
-    // Retro scan lines alternate every pixel row at 100% scaling.
-    _pixelShaderSettings.ScaledScanLinePeriod = _scale * 1.0f;
+    if (_pixelShaderEffect && _d3dDeviceContext && _pixelShaderSettingsBuffer)
+    {
+        try
+        {
+            // Set the time
+            //  TODO: Grab timestamp
+            _pixelShaderSettings.Time = 0.0f;
 
-    // Gaussian distribution sigma used for blurring.
-    _pixelShaderSettings.ScaledGaussianSigma = _scale * 2.0f;
+            // Set the UI Scale
+            _pixelShaderSettings.Scale = _scale;
+
+            // Set the display resolution
+            const float w = 1.0f * _displaySizePixels.width<UINT>();
+            const float h = 1.0f * _displaySizePixels.height<UINT>();
+            _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
+
+            // Set the background
+            DirectX::XMFLOAT4 background{};
+            background.x = _backgroundColor.r;
+            background.y = _backgroundColor.g;
+            background.z = _backgroundColor.b;
+            background.w = _backgroundColor.a;
+            _pixelShaderSettings.Background = background;
+
+            _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
+        }
+        CATCH_LOG();
+    }
 }
 
 // Routine Description;
@@ -521,12 +605,12 @@ try
             }
         }
 
-        if (_retroTerminalEffects)
+        if (_pixelShaderEffect)
         {
             const HRESULT hr = _SetupTerminalEffects();
             if (FAILED(hr))
             {
-                _retroTerminalEffects = false;
+                _pixelShaderEffect.reset();
                 LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
             }
         }
@@ -786,17 +870,17 @@ void DxEngine::SetCallback(std::function<void()> pfn)
     _pfn = pfn;
 }
 
-bool DxEngine::GetRetroTerminalEffects() const noexcept
+std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const noexcept
 {
-    return _retroTerminalEffects;
+    return _pixelShaderEffect;
 }
 
-void DxEngine::SetRetroTerminalEffects(bool enable) noexcept
+void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
 try
 {
-    if (_retroTerminalEffects != enable)
+    if (_pixelShaderEffect != value)
     {
-        _retroTerminalEffects = enable;
+        _pixelShaderEffect = value;
         _recreateDeviceRequested = true;
         LOG_IF_FAILED(InvalidateAll());
     }
@@ -1072,11 +1156,11 @@ try
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
     //
-    // If retro terminal effects are on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of retro terminal effects.
+    // If pixel shader effect is on, we must invalidate everything for them to draw correctly.
+    // Yes, this will further impact the performance of pixel shader effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
-    if (_forceFullRepaintRendering || _retroTerminalEffects)
+    if (_forceFullRepaintRendering || _pixelShaderEffect)
     {
         _invalidMap.set_all();
     }
@@ -1296,12 +1380,12 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
-        if (_retroTerminalEffects)
+        if (_pixelShaderEffect)
         {
             const HRESULT hr2 = _PaintTerminalEffects();
             if (FAILED(hr2))
             {
-                _retroTerminalEffects = false;
+                _pixelShaderEffect.reset();
                 LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
             }
         }
@@ -1710,6 +1794,9 @@ CATCH_RETURN()
         _drawingContext->forceGrayscaleAA = _ShouldForceGrayscaleAA();
     }
 
+    // Update pixel shader settings as background color might have changed
+    _ComputePixelShaderSettings();
+
     return S_OK;
 }
 
@@ -1766,15 +1853,8 @@ CATCH_RETURN();
 
     RETURN_IF_FAILED(InvalidateAll());
 
-    if (_retroTerminalEffects && _d3dDeviceContext && _pixelShaderSettingsBuffer)
-    {
-        _ComputePixelShaderSettings();
-        try
-        {
-            _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
-        }
-        CATCH_RETURN();
-    }
+    // Update pixel shader settings as scale might have changed
+    _ComputePixelShaderSettings();
 
     return S_OK;
 }

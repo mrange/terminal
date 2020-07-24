@@ -90,11 +90,11 @@ namespace winrt::Microsoft::Terminal::Settings::implementation
 
         GETSET_PROPERTY(TextAntialiasingMode, AntialiasingMode, TextAntialiasingMode::Grayscale);
 
-        GETSET_PROPERTY(bool, RetroTerminalEffect, false);
         GETSET_PROPERTY(bool, ForceFullRepaintRendering, false);
         GETSET_PROPERTY(bool, SoftwareRendering, false);
         GETSET_PROPERTY(bool, ForceVTInput, false);
 
+        GETSET_PROPERTY(hstring, PixelShaderEffect);
 #pragma warning(pop)
 
     private:
