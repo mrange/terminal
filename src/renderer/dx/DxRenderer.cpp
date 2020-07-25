@@ -58,6 +58,7 @@ static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
 static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
 static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
+#pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
 static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
     { L"RETRO", RETRO_PIXEL_SHADER },
     { L"RETROII", RETROII_PIXEL_SHADER },
