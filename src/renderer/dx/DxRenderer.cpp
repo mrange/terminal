@@ -700,6 +700,8 @@ try
         CATCH_LOG(); // A failure in the notification function isn't a failure to prepare, so just log it and go on.
     }
 
+    _recreateDeviceRequested = false;
+
     return S_OK;
 }
 CATCH_RETURN();
@@ -799,7 +801,15 @@ void DxEngine::_ReleaseDeviceResources() noexcept
     {
         _haveDeviceResources = false;
 
+        // Destroy Terminal Effect resources
+        _renderTargetView.Reset();
+        _vertexShader.Reset();
+        _pixelShader.Reset();
+        _vertexLayout.Reset();
+        _screenQuadVertexBuffer.Reset();
         _pixelShaderSettingsBuffer.Reset();
+        _samplerState.Reset();
+        _framebufferCapture.Reset();
 
         _d2dBrushForeground.Reset();
         _d2dBrushBackground.Reset();
@@ -1261,7 +1271,6 @@ try
         if (!_haveDeviceResources || _recreateDeviceRequested)
         {
             RETURN_IF_FAILED(_CreateDeviceResources(true));
-            _recreateDeviceRequested = false;
         }
         else if (_displaySizePixels != clientSize || _prevScale != _scale)
         {
