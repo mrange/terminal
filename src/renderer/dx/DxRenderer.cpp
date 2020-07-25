@@ -477,10 +477,10 @@ void DxEngine::_UpdatePixelShaderSettings() noexcept
         try
         {
             LARGE_INTEGER counter{};
-            if(QueryPerformanceCounter(&counter))
+            if (QueryPerformanceCounter(&counter))
             {
                 _pixelShaderSettings.Time =
-                    static_cast<float>(counter.QuadPart - _counterStart.QuadPart)/
+                    static_cast<float>(counter.QuadPart - _counterStart.QuadPart) /
                     static_cast<float>(_counterFrequency.QuadPart);
             }
             else
