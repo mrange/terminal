@@ -79,7 +79,6 @@ DxEngine::DxEngine() :
     _invalidMap{},
     _invalidScroll{},
     _allInvalid{ false },
-    _firstFrame{ true },
     _presentParams{ 0 },
     _presentReady{ false },
     _presentScroll{ 0 },
@@ -686,9 +685,6 @@ try
         // With a new swap chain, mark the entire thing as invalid.
         RETURN_IF_FAILED(InvalidateAll());
 
-        // This is our first frame on this new target.
-        _firstFrame = true;
-
         RETURN_IF_FAILED(_PrepareRenderTarget());
     }
 
@@ -1127,6 +1123,9 @@ try
 {
     RETURN_HR_IF(E_INVALIDARG, !pcoordDelta);
 
+    // TODO: Reimplement invalidate scroll by scrolling the framebuffer texture
+    RETURN_IF_FAILED(InvalidateAll());
+    /*
     const til::point deltaCells{ *pcoordDelta };
 
     if (!_allInvalid)
@@ -1139,6 +1138,7 @@ try
             _allInvalid = _IsAllInvalid();
         }
     }
+    */
 
     return S_OK;
 }
@@ -1155,16 +1155,6 @@ try
 {
     _invalidMap.set_all();
     _allInvalid = true;
-
-    // Since everything is invalidated here, mark this as a "first frame", so
-    // that we won't use incremental drawing on it. The caller of this intended
-    // for _everything_ to get redrawn, so setting _firstFrame will force us to
-    // redraw the entire frame. This will make sure that things like the gutters
-    // get cleared correctly.
-    //
-    // Invalidating everything is supposed to happen with resizes of the
-    // entire canvas, changes of the font, and other such adjustments.
-    _firstFrame = true;
     return S_OK;
 }
 CATCH_RETURN();
@@ -1301,9 +1291,6 @@ try
 
             // And persist the new size.
             _displaySizePixels = clientSize;
-
-            // Mark this as the first frame on the new target. We can't use incremental drawing on the first frame.
-            _firstFrame = true;
         }
 
         _d2dDeviceContext->BeginDraw();
@@ -1356,6 +1343,8 @@ try
 
         if (SUCCEEDED(hr))
         {
+            // TODO: Reimplement invalidate scroll by scrolling the framebuffer texture
+            /*
             if (_invalidScroll != til::point{ 0, 0 })
             {
                 // Copy `til::rectangles` into RECT map.
@@ -1396,6 +1385,7 @@ try
                     _presentParams.pScrollOffset = nullptr;
                 }
             }
+            */
 
             _presentReady = true;
         }
@@ -1478,44 +1468,10 @@ void DxEngine::WaitUntilCanRender() noexcept
             _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
             _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
 
-            HRESULT hr = S_OK;
+            const HRESULT hr = _dxgiSwapChain->Present(1, 0);
 
-            bool recreate = false;
-
-            // Terminal effects might have global effects which the full frame needs repainting
-            _firstFrame |= _HasTerminalEffects();
-
-            // On anything but the first frame, try partial presentation.
-            // We'll do it first because if it fails, we'll try again with full presentation.
-            if (!_firstFrame)
-            {
-                hr = _dxgiSwapChain->Present1(1, 0, &_presentParams);
-
-                // These two error codes are indicated for destroy-and-recreate
-                // If we were told to destroy-and-recreate, we're going to skip straight into doing that
-                // and not try again with full presentation.
-                recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
-
-                // Log this as we actually don't expect it to happen, we just will try again
-                // below for robustness of our drawing.
-                if (FAILED(hr) && !recreate)
-                {
-                    LOG_HR(hr);
-                }
-            }
-
-            // If it's the first frame through, we cannot do partial presentation.
-            // Also if partial presentation failed above and we weren't told to skip straight to
-            // device recreation.
-            // In both of these circumstances, do a full presentation.
-            if (_firstFrame || (FAILED(hr) && !recreate))
-            {
-                hr = _dxgiSwapChain->Present(1, 0);
-                _firstFrame = false;
-
-                // These two error codes are indicated for destroy-and-recreate
-                recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
-            }
+            // These two error codes are indicated for destroy-and-recreate
+            const bool recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
 
             // Now check for failure cases from either presentation mode.
             if (FAILED(hr))
