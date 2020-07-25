@@ -54,9 +54,13 @@ D3D11_INPUT_ELEMENT_DESC _shaderInputLayout[] = {
 static constexpr float POINTS_PER_INCH = 72.0f;
 static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Lucida Console", L"Courier New" };
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
-static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS = {
-    { L"RETRO", retroPixelShaderString },
-    { L"RETROII", retroIIPixelShaderString },
+
+static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
+static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
+static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
+static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
+    { L"RETRO", RETRO_PIXEL_SHADER },
+    { L"RETROII", RETROII_PIXEL_SHADER },
 };
 
 using namespace Microsoft::Console::Render;
@@ -280,14 +284,14 @@ std::string DxEngine::_LoadPixelShaderEffect() const
         // If the user specified the legacy option retroTerminalEffect it has precendence
         if (_retroTerminalEffect)
         {
-            return std::string{ std::string_view{ retroPixelShaderString } };
+            return std::string{ RETRO_PIXEL_SHADER };
         }
 
         // If no pixel shader effect is specified this function shouldn't end up being called.
         //  If it happens anyway return the error shader
         if (!_pixelShaderEffect)
         {
-            return std::string{ std::string_view{ errorPixelShaderString } };
+            return std::string{ ERROR_PIXEL_SHADER };
         }
 
         auto pixelShaderEffect = *_pixelShaderEffect;
@@ -329,7 +333,7 @@ std::string DxEngine::_LoadPixelShaderEffect() const
         //  the error pixel shader which should "always" be able to load and indicates
         //  to the user something went wrong
         LOG_CAUGHT_EXCEPTION();
-        return std::string{ std::string_view{ errorPixelShaderString } };
+        return std::string{ ERROR_PIXEL_SHADER };
     }
 }
 
@@ -376,7 +380,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
     catch (...)
     {
         LOG_CAUGHT_EXCEPTION();
-        pixelBlob = _CompileShader(errorPixelShaderString, "ps_5_0");
+        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
     }
 
     RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(

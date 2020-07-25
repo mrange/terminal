@@ -1,11 +1,11 @@
 #pragma once
 
 #ifdef __INSIDE_WINDOWS
-const char errorPixelShaderString[] = "";
-const char retroPixelShaderString[] = "";
-const char retroIIPixelShaderString[] = "";
+constexpr char errorPixelShaderString[] = "";
+constexpr char retroPixelShaderString[] = "";
+constexpr char retroIIPixelShaderString[] = "";
 #else
-const char errorPixelShaderString[] = R"(
+constexpr char errorPixelShaderString[] = R"(
 // Shader used to indicate something went wrong during shader loading
 Texture2D shaderTexture;
 SamplerState samplerState;
@@ -26,7 +26,7 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET
 }
 )";
 
-const char retroPixelShaderString[] = R"(
+constexpr char retroPixelShaderString[] = R"(
 // The original retro pixel shader
 Texture2D shaderTexture;
 SamplerState samplerState;
@@ -112,7 +112,7 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET
 }
 )";
 
-const char retroIIPixelShaderString[] = R"(
+constexpr char retroIIPixelShaderString[] = R"(
 // In order to run in KodeLife (great Shader IDE and free with some nagging),
 //  define the following:
 // #define KODELIFE
