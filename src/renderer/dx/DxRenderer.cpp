@@ -362,12 +362,6 @@ HRESULT DxEngine::_SetupTerminalEffects()
     // Setup render target.
     RETURN_IF_FAILED(_d3dDevice->CreateRenderTargetView(swapBuffer.Get(), nullptr, &_renderTargetView));
 
-    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
-    D3D11_TEXTURE2D_DESC framebufferCaptureDesc{};
-    swapBuffer->GetDesc(&framebufferCaptureDesc);
-    WI_SetFlag(framebufferCaptureDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
-    RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_framebufferCapture));
-
     // Setup the viewport.
     D3D11_VIEWPORT vp;
     vp.Width = _displaySizePixels.width<float>();
@@ -671,6 +665,15 @@ try
             }
         }
 
+        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
+        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
+
+        // Setup _framebuffer, to where we'll write all console graphics
+        D3D11_TEXTURE2D_DESC framebufferDesc{};
+        swapBuffer->GetDesc(&framebufferDesc);
+        WI_SetFlag(framebufferDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
+        RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferDesc, nullptr, &_framebuffer));
+
         if (_HasTerminalEffects())
         {
             const HRESULT hr = _SetupTerminalEffects();
@@ -738,8 +741,7 @@ static constexpr D2D1_ALPHA_MODE _dxgiAlphaToD2d1Alpha(DXGI_ALPHA_MODE mode) noe
 {
     try
     {
-        // Pull surface out of swap chain.
-        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&_dxgiSurface)));
+        RETURN_IF_FAILED(_framebuffer->QueryInterface(IID_PPV_ARGS(&_dxgiSurface)));
 
         // Make a bitmap and bind it to the swap chain surface
         const auto bitmapProperties = D2D1::BitmapProperties1(
@@ -811,7 +813,14 @@ void DxEngine::_ReleaseDeviceResources() noexcept
     {
         _haveDeviceResources = false;
 
+        // Terminal effects resources
+        _renderTargetView.Reset();
+        _vertexShader.Reset();
+        _pixelShader.Reset();
+        _vertexLayout.Reset();
+        _screenQuadVertexBuffer.Reset();
         _pixelShaderSettingsBuffer.Reset();
+        _samplerState.Reset();
 
         _d2dBrushForeground.Reset();
         _d2dBrushBackground.Reset();
@@ -822,6 +831,8 @@ void DxEngine::_ReleaseDeviceResources() noexcept
         {
             _d2dDeviceContext->EndDraw();
         }
+
+        _framebuffer.Reset();
 
         _d2dDeviceContext.Reset();
 
@@ -1767,16 +1778,10 @@ CATCH_RETURN()
 try
 {
     // Should have been initialized.
-    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
+    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
 
-    // Capture current frame in swap chain to a texture.
-    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
-    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&swapBuffer)));
-    _d3dDeviceContext->CopyResource(_framebufferCapture.Get(), swapBuffer.Get());
-
-    // Prepare captured texture as input resource to shader program.
     D3D11_TEXTURE2D_DESC desc;
-    _framebufferCapture->GetDesc(&desc);
+    _framebuffer->GetDesc(&desc);
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
     srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -1785,7 +1790,7 @@ try
     srvDesc.Format = desc.Format;
 
     ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &shaderResource));
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
 
     // Render the screen quad with shader effects.
     const UINT stride = sizeof(ShaderInput);

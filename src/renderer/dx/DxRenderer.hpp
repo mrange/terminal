@@ -205,6 +205,8 @@ namespace Microsoft::Console::Render
         wil::unique_handle _swapChainFrameLatencyWaitableObject;
         std::unique_ptr<DrawingContext> _drawingContext;
 
+        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebuffer;
+
         // Terminal effects resources.
 
         // Controls if configured terminal effects are enabled
@@ -228,7 +230,6 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<ID3D11Buffer> _screenQuadVertexBuffer;
         ::Microsoft::WRL::ComPtr<ID3D11Buffer> _pixelShaderSettingsBuffer;
         ::Microsoft::WRL::ComPtr<ID3D11SamplerState> _samplerState;
-        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebufferCapture;
 
         // Preferences and overrides
         bool _softwareRendering;
