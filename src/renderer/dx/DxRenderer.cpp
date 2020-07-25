@@ -98,11 +98,14 @@ DxEngine::DxEngine() :
     _recreateDeviceRequested{ false },
     _terminalEffectsEnabled{ false },
     _retroTerminalEffect{ false },
-    _pixelShaderEffect{},
     _forceFullRepaintRendering{ false },
+    _pixelShaderSettings{},
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
     _defaultTextBackgroundOpacity{ 1.0f },
+    _counterFrequency{},
+    _counterStart{},
+    _pixelShaderEffect{},
     _hwndTarget{ static_cast<HWND>(INVALID_HANDLE_VALUE) },
     _sizeTarget{},
     _dpi{ USER_DEFAULT_SCREEN_DPI },
@@ -359,8 +362,11 @@ std::string DxEngine::_LoadPixelShaderEffect() const
 // Arguments:
 // Return Value:
 // - HRESULT status.
-HRESULT DxEngine::_SetupTerminalEffects()
+[[nodiscard]] HRESULT DxEngine::_SetupTerminalEffects()
 {
+    LOG_IF_WIN32_BOOL_FALSE(QueryPerformanceFrequency(&_counterFrequency));
+    LOG_IF_WIN32_BOOL_FALSE(QueryPerformanceCounter(&_counterStart));
+
     auto pixelShaderSource = _LoadPixelShaderEffect();
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
@@ -430,8 +436,6 @@ HRESULT DxEngine::_SetupTerminalEffects()
     pixelShaderSettingsBufferDesc.ByteWidth = sizeof(_pixelShaderSettings);
     pixelShaderSettingsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 
-    _ComputePixelShaderSettings();
-
     D3D11_SUBRESOURCE_DATA pixelShaderSettingsInitData{};
     pixelShaderSettingsInitData.pSysMem = &_pixelShaderSettings;
 
@@ -466,22 +470,30 @@ HRESULT DxEngine::_SetupTerminalEffects()
 // - <none>
 // Return Value:
 // - <none>
-void DxEngine::_ComputePixelShaderSettings() noexcept
+void DxEngine::_UpdatePixelShaderSettings() noexcept
 {
     if (_HasTerminalEffects() && _d3dDeviceContext && _pixelShaderSettingsBuffer)
     {
         try
         {
-            // Set the time
-            //  TODO:GH#7013 Grab timestamp
-            _pixelShaderSettings.Time = 0.0f;
+            LARGE_INTEGER counter{};
+            if(QueryPerformanceCounter(&counter))
+            {
+                _pixelShaderSettings.Time =
+                    static_cast<float>(counter.QuadPart - _counterStart.QuadPart)/
+                    static_cast<float>(_counterFrequency.QuadPart);
+            }
+            else
+            {
+                _pixelShaderSettings.Time = 0.0f;
+            }
 
             // Set the UI Scale
             _pixelShaderSettings.Scale = _scale;
 
             // Set the display resolution
-            const float w = 1.0f * _displaySizePixels.width<UINT>();
-            const float h = 1.0f * _displaySizePixels.height<UINT>();
+            const float w = static_cast<float>(_displaySizePixels.width<UINT>());
+            const float h = static_cast<float>(_displaySizePixels.height<UINT>());
             _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
 
             // Set the background
@@ -1425,6 +1437,43 @@ void DxEngine::WaitUntilCanRender() noexcept
     }
 }
 
+[[nodiscard]] HRESULT DxEngine::_RenderToSwapChain() noexcept
+try
+{
+    // Should have been initialized.
+    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
+
+    D3D11_TEXTURE2D_DESC desc;
+    _framebuffer->GetDesc(&desc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = desc.MipLevels;
+    srvDesc.Format = desc.Format;
+
+    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
+
+    // Render the screen quad with shader effects.
+    const UINT stride = sizeof(ShaderInput);
+    const UINT offset = 0;
+
+    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
+    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
+    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
+    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
+    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
+    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
+    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
+
+    return S_OK;
+}
+CATCH_RETURN()
+
 // Routine Description:
 // - Takes queued drawing information and presents it to the screen.
 // - This is separated out so it can be done outside the lock as it's expensive.
@@ -1438,35 +1487,11 @@ void DxEngine::WaitUntilCanRender() noexcept
     {
         try
         {
-            // Should have been initialized.
-            RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
+            // Updates the pixel shader resource (including time)
+            _UpdatePixelShaderSettings();
 
-            D3D11_TEXTURE2D_DESC desc;
-            _framebuffer->GetDesc(&desc);
-
-            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MostDetailedMip = 0;
-            srvDesc.Texture2D.MipLevels = desc.MipLevels;
-            srvDesc.Format = desc.Format;
-
-            ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-            RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
-
-            // Render the screen quad with shader effects.
-            const UINT stride = sizeof(ShaderInput);
-            const UINT offset = 0;
-
-            _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
-            _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
-            _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-            _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
-            _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
-            _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
-            _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
-            _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
-            _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
-            _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
+            // Renders framebuffer texture + potential pixel shader effects
+            LOG_IF_FAILED(_RenderToSwapChain());
 
             const HRESULT hr = _dxgiSwapChain->Present(1, 0);
 
@@ -1766,9 +1791,6 @@ CATCH_RETURN()
         _drawingContext->forceGrayscaleAA = _ShouldForceGrayscaleAA();
     }
 
-    // Update pixel shader settings as background color might have changed
-    _ComputePixelShaderSettings();
-
     return S_OK;
 }
 
@@ -1823,9 +1845,6 @@ CATCH_RETURN();
     _scale = _dpi / static_cast<float>(USER_DEFAULT_SCREEN_DPI);
 
     RETURN_IF_FAILED(InvalidateAll());
-
-    // Update pixel shader settings as scale might have changed
-    _ComputePixelShaderSettings();
 
     return S_OK;
 }

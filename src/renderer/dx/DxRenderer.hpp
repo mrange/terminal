@@ -237,6 +237,8 @@ namespace Microsoft::Console::Render
 
         float _defaultTextBackgroundOpacity;
 
+        LARGE_INTEGER _counterFrequency;
+        LARGE_INTEGER _counterStart;
         // DirectX constant buffers need to be a multiple of 16; align to pad the size.
         __declspec(align(16)) struct
         {
@@ -255,8 +257,9 @@ namespace Microsoft::Console::Render
         bool _HasTerminalEffects() const noexcept;
         void _DisableTerminalEffects() noexcept;
         std::string _LoadPixelShaderEffect() const;
-        HRESULT _SetupTerminalEffects();
-        void _ComputePixelShaderSettings() noexcept;
+        [[nodiscard]] HRESULT _SetupTerminalEffects();
+        void _UpdatePixelShaderSettings() noexcept;
+        [[nodiscard]] HRESULT _RenderToSwapChain() noexcept;
 
         [[nodiscard]] HRESULT _PrepareRenderTarget() noexcept;
 
