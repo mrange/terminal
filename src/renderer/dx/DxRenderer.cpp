@@ -241,6 +241,16 @@ _CompileShader(
 }
 
 // Routine Description:
+// - Checks if full repaints should be used
+// Arguments:
+// Return Value:
+// - True if full repaints are used
+bool DxEngine::_DoFullRepaint() const noexcept
+{
+    return _forceFullRepaintRendering || _HasTerminalEffects();
+}
+
+// Routine Description:
 // - Checks if terminal effects are enabled
 // Arguments:
 // Return Value:
@@ -1235,7 +1245,7 @@ try
     // Yes, this will further impact the performance of terminal effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
-    if (_forceFullRepaintRendering || _HasTerminalEffects())
+    if (_DoFullRepaint())
     {
         _invalidMap.set_all();
     }
@@ -1409,17 +1419,21 @@ CATCH_RETURN()
 // - Any DirectX error, a memory error, etc.
 [[nodiscard]] HRESULT DxEngine::_CopyFrontToBack() noexcept
 {
-    try
+    // Only copy front to back if partial updates are allowed
+    if (!_DoFullRepaint())
     {
-        Microsoft::WRL::ComPtr<ID3D11Resource> backBuffer;
-        Microsoft::WRL::ComPtr<ID3D11Resource> frontBuffer;
+        try
+        {
+            Microsoft::WRL::ComPtr<ID3D11Resource> backBuffer;
+            Microsoft::WRL::ComPtr<ID3D11Resource> frontBuffer;
 
-        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)));
-        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(1, IID_PPV_ARGS(&frontBuffer)));
+            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)));
+            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(1, IID_PPV_ARGS(&frontBuffer)));
 
-        _d3dDeviceContext->CopyResource(backBuffer.Get(), frontBuffer.Get());
+            _d3dDeviceContext->CopyResource(backBuffer.Get(), frontBuffer.Get());
+        }
+        CATCH_RETURN();
     }
-    CATCH_RETURN();
 
     return S_OK;
 }
