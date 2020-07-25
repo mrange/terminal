@@ -62,6 +62,8 @@ namespace Microsoft::Console::Render
 
         virtual void AddRenderEngine(_In_ IRenderEngine* const pEngine) = 0;
 
+        [[nodiscard]] virtual HRESULT FastPaintFrame() = 0;
+
     protected:
         IRenderer() = default;
     };

@@ -1474,6 +1474,11 @@ try
 }
 CATCH_RETURN()
 
+[[nodiscard]] HRESULT DxEngine::FastPresent() noexcept
+{
+    return Present();
+}
+
 // Routine Description:
 // - Takes queued drawing information and presents it to the screen.
 // - This is separated out so it can be done outside the lock as it's expensive.
@@ -1515,8 +1520,6 @@ CATCH_RETURN()
                     FAIL_FAST_HR(hr);
                 }
             }
-
-            _presentReady = false;
 
             _presentDirty.clear();
             _presentOffset = { 0 };
