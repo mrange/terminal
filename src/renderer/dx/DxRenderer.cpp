@@ -710,6 +710,8 @@ try
         CATCH_LOG(); // A failure in the notification function isn't a failure to prepare, so just log it and go on.
     }
 
+    _recreateDeviceRequested = false;
+
     return S_OK;
 }
 CATCH_RETURN();
@@ -1271,7 +1273,6 @@ try
         if (!_haveDeviceResources || _recreateDeviceRequested)
         {
             RETURN_IF_FAILED(_CreateDeviceResources(true));
-            _recreateDeviceRequested = false;
         }
         else if (_displaySizePixels != clientSize || _prevScale != _scale)
         {
