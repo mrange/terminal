@@ -56,6 +56,7 @@ static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Luci
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 
 static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
+static constexpr std::string_view NOP_PIXEL_SHADER{ nopPixelShaderString };
 static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
 static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
 #pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
@@ -247,7 +248,7 @@ _CompileShader(
 // - True if full repaints are used
 bool DxEngine::_DoFullRepaint() const noexcept
 {
-    return _forceFullRepaintRendering || _HasTerminalEffects();
+    return _forceFullRepaintRendering;
 }
 
 // Routine Description:
@@ -292,6 +293,12 @@ std::string DxEngine::_LoadPixelShaderEffect() const
 {
     try
     {
+        // If no terminal effects are selected return the nop shader
+        if (!_HasTerminalEffects())
+        {
+            return std::string{ NOP_PIXEL_SHADER };
+        }
+
         // If the user specified the legacy option retroTerminalEffect it has precendence
         if (_retroTerminalEffect)
         {
@@ -674,15 +681,7 @@ try
         WI_SetFlag(framebufferDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
         RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferDesc, nullptr, &_framebuffer));
 
-        if (_HasTerminalEffects())
-        {
-            const HRESULT hr = _SetupTerminalEffects();
-            if (FAILED(hr))
-            {
-                _DisableTerminalEffects();
-                LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
-            }
-        }
+        RETURN_IF_FAILED(_SetupTerminalEffects());
 
         // With a new swap chain, mark the entire thing as invalid.
         RETURN_IF_FAILED(InvalidateAll());
@@ -1253,11 +1252,6 @@ try
 
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
-    //
-    // If terminal effects are on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of terminal effects.
-    // But we're talking about running the entire display pipeline through a shader for
-    // cosmetic effect, so performance isn't likely the top concern with this feature.
     if (_DoFullRepaint())
     {
         _invalidMap.set_all();
@@ -1421,35 +1415,6 @@ try
 }
 CATCH_RETURN()
 
-// Routine Description:
-// - Copies the front surface of the swap chain (the one being displayed)
-//   to the back surface of the swap chain (the one we draw on next)
-//   so we can draw on top of what's already there.
-// Arguments:
-// - <none>
-// Return Value:
-// - Any DirectX error, a memory error, etc.
-[[nodiscard]] HRESULT DxEngine::_CopyFrontToBack() noexcept
-{
-    // Only copy front to back if partial updates are allowed
-    if (!_DoFullRepaint())
-    {
-        try
-        {
-            Microsoft::WRL::ComPtr<ID3D11Resource> backBuffer;
-            Microsoft::WRL::ComPtr<ID3D11Resource> frontBuffer;
-
-            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)));
-            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(1, IID_PPV_ARGS(&frontBuffer)));
-
-            _d3dDeviceContext->CopyResource(backBuffer.Get(), frontBuffer.Get());
-        }
-        CATCH_RETURN();
-    }
-
-    return S_OK;
-}
-
 // Method Description:
 // - Blocks until the engine is able to render without blocking.
 // - See https://docs.microsoft.com/en-us/windows/uwp/gaming/reduce-latency-with-dxgi-1-3-swap-chains.
@@ -1481,21 +1446,44 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
-        if (_HasTerminalEffects())
-        {
-            const HRESULT hr2 = _PaintTerminalEffects();
-            if (FAILED(hr2))
-            {
-                _DisableTerminalEffects();
-                LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
-            }
-        }
-
         try
         {
+            // Should have been initialized.
+            RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
+
+            D3D11_TEXTURE2D_DESC desc;
+            _framebuffer->GetDesc(&desc);
+
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MostDetailedMip = 0;
+            srvDesc.Texture2D.MipLevels = desc.MipLevels;
+            srvDesc.Format = desc.Format;
+
+            ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
+            RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
+
+            // Render the screen quad with shader effects.
+            const UINT stride = sizeof(ShaderInput);
+            const UINT offset = 0;
+
+            _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
+            _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
+            _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
+            _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
+            _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
+            _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
+            _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
+            _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
+            _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
+
             HRESULT hr = S_OK;
 
             bool recreate = false;
+
+            // Terminal effects might have global effects which the full frame needs repainting
+            _firstFrame |= _HasTerminalEffects();
 
             // On anything but the first frame, try partial presentation.
             // We'll do it first because if it fails, we'll try again with full presentation.
@@ -1547,10 +1535,6 @@ void DxEngine::WaitUntilCanRender() noexcept
                 }
             }
 
-            // Finally copy the front image (being presented now) onto the backing buffer
-            // (where we are about to draw the next frame) so we can draw only the differences
-            // next frame.
-            RETURN_IF_FAILED(_CopyFrontToBack());
             _presentReady = false;
 
             _presentDirty.clear();
@@ -1768,48 +1752,6 @@ CATCH_RETURN()
 {
     return S_OK;
 }
-
-// Routine Description:
-// - Paint terminal effects.
-// Arguments:
-// Return Value:
-// - S_OK or relevant DirectX error.
-[[nodiscard]] HRESULT DxEngine::_PaintTerminalEffects() noexcept
-try
-{
-    // Should have been initialized.
-    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
-
-    D3D11_TEXTURE2D_DESC desc;
-    _framebuffer->GetDesc(&desc);
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    srvDesc.Texture2D.MipLevels = desc.MipLevels;
-    srvDesc.Format = desc.Format;
-
-    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
-
-    // Render the screen quad with shader effects.
-    const UINT stride = sizeof(ShaderInput);
-    const UINT offset = 0;
-
-    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
-    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
-    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
-    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
-    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
-    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
-    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
-
-    return S_OK;
-}
-CATCH_RETURN()
 
 // Routine Description:
 // - Updates the default brush colors used for drawing

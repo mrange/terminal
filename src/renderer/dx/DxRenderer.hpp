@@ -126,7 +126,6 @@ namespace Microsoft::Console::Render
 
     protected:
         [[nodiscard]] HRESULT _DoUpdateTitle(_In_ const std::wstring& newTitle) noexcept override;
-        [[nodiscard]] HRESULT _PaintTerminalEffects() noexcept;
 
     private:
         enum class SwapChainMode
@@ -270,8 +269,6 @@ namespace Microsoft::Console::Render
             _In_reads_(StringLength) PCWCHAR String,
             _In_ size_t StringLength,
             _Out_ IDWriteTextLayout** ppTextLayout) noexcept;
-
-        [[nodiscard]] HRESULT _CopyFrontToBack() noexcept;
 
         [[nodiscard]] HRESULT _EnableDisplayAccess(const bool outputEnabled) noexcept;
 
