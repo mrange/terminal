@@ -55,15 +55,6 @@ static constexpr float POINTS_PER_INCH = 72.0f;
 static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Lucida Console", L"Courier New" };
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 
-static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
-static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
-static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
-#pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
-static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
-    { L"RETRO", RETRO_PIXEL_SHADER },
-    { L"RETROII", RETROII_PIXEL_SHADER },
-};
-
 using namespace Microsoft::Console::Render;
 using namespace Microsoft::Console::Types;
 
@@ -96,9 +87,11 @@ DxEngine::DxEngine() :
     _swapChainDesc{ 0 },
     _swapChainFrameLatencyWaitableObject{ INVALID_HANDLE_VALUE },
     _recreateDeviceRequested{ false },
+#ifdef __USE_TERMINAL_EFFECTS
     _terminalEffectsEnabled{ false },
     _retroTerminalEffect{ false },
     _pixelShaderEffect{},
+#endif
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
@@ -205,7 +198,7 @@ _CompileShader(
     std::string target,
     std::string entry = "main")
 {
-#ifdef __INSIDE_WINDOWS
+#ifdef ___INSIDE_WINDOWS
     THROW_HR(E_UNEXPECTED);
     return 0;
 #else
@@ -238,254 +231,6 @@ _CompileShader(
 
     return code;
 #endif
-}
-
-// Routine Description:
-// - Checks if terminal effects are enabled
-// Arguments:
-// Return Value:
-// - True if terminal effects are enabled
-bool DxEngine::_HasTerminalEffects() const noexcept
-{
-    return _terminalEffectsEnabled && (_retroTerminalEffect || _pixelShaderEffect);
-}
-
-// Routine Description:
-// - Disable terminal effects
-// Arguments:
-// Return Value:
-// - Void
-void DxEngine::_DisableTerminalEffects() noexcept
-{
-    _terminalEffectsEnabled = false;
-    _retroTerminalEffect = false;
-    _pixelShaderEffect.reset();
-}
-
-// Routine Description:
-// - Toggles terminal effects off and on. If no terminal effect is configured has no effect
-// Arguments:
-// Return Value:
-// - Void
-void DxEngine::ToggleTerminalEffects()
-{
-    _terminalEffectsEnabled = !_terminalEffectsEnabled;
-    LOG_IF_FAILED(InvalidateAll());
-}
-
-// Routine Description:
-// - Loads pixel shader source depending on _retroTerminalEffect and _pixelShaderEffect
-// Arguments:
-// Return Value:
-// - Pixel shader source code
-std::string DxEngine::_LoadPixelShaderEffect() const
-{
-    try
-    {
-        // If the user specified the legacy option retroTerminalEffect it has precendence
-        if (_retroTerminalEffect)
-        {
-            return std::string{ RETRO_PIXEL_SHADER };
-        }
-
-        // If no pixel shader effect is specified this function shouldn't end up being called.
-        //  If it happens anyway return the error shader
-        if (!_pixelShaderEffect)
-        {
-            return std::string{ ERROR_PIXEL_SHADER };
-        }
-
-        auto pixelShaderEffect = *_pixelShaderEffect;
-
-        const auto pixelShaderPreset = PIXEL_SHADER_PRESETS.find(pixelShaderEffect);
-
-        if (pixelShaderPreset != PIXEL_SHADER_PRESETS.end())
-        {
-            return std::string{ pixelShaderPreset->second };
-        }
-
-        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
-                                             GENERIC_READ,
-                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                             nullptr,
-                                             OPEN_EXISTING,
-                                             FILE_ATTRIBUTE_NORMAL,
-                                             nullptr) };
-
-        THROW_LAST_ERROR_IF(!hFile);
-
-        // fileSize is in bytes
-        const auto fileSize = GetFileSize(hFile.get(), nullptr);
-        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
-
-        auto utf8buffer = std::vector<char>(fileSize);
-
-        DWORD bytesRead = 0;
-        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
-
-        // convert buffer to UTF-8 string
-        std::string utf8string(utf8buffer.data(), fileSize);
-
-        return utf8string;
-    }
-    catch (...)
-    {
-        // If we ran into any problems during loading pixel shader let's revert to
-        //  the error pixel shader which should "always" be able to load and indicates
-        //  to the user something went wrong
-        LOG_CAUGHT_EXCEPTION();
-        return std::string{ ERROR_PIXEL_SHADER };
-    }
-}
-
-// Routine Description:
-// - Setup D3D objects for doing shader things for terminal effects.
-// Arguments:
-// Return Value:
-// - HRESULT status.
-HRESULT DxEngine::_SetupTerminalEffects()
-{
-    auto pixelShaderSource = _LoadPixelShaderEffect();
-    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
-    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
-
-    // Setup render target.
-    RETURN_IF_FAILED(_d3dDevice->CreateRenderTargetView(swapBuffer.Get(), nullptr, &_renderTargetView));
-
-    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
-    D3D11_TEXTURE2D_DESC framebufferCaptureDesc{};
-    swapBuffer->GetDesc(&framebufferCaptureDesc);
-    WI_SetFlag(framebufferCaptureDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
-    RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_framebufferCapture));
-
-    // Setup the viewport.
-    D3D11_VIEWPORT vp;
-    vp.Width = _displaySizePixels.width<float>();
-    vp.Height = _displaySizePixels.height<float>();
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    vp.TopLeftX = 0;
-    vp.TopLeftY = 0;
-    _d3dDeviceContext->RSSetViewports(1, &vp);
-
-    // Prepare shaders.
-    auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
-    // As the pixel shader source is user provided it's possible there's a problem with it
-    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
-    //  If even the error pixel shader fails to load rely on standard exception handling
-    try
-    {
-        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
-    }
-    catch (...)
-    {
-        LOG_CAUGHT_EXCEPTION();
-        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
-    }
-
-    RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
-        vertexBlob->GetBufferPointer(),
-        vertexBlob->GetBufferSize(),
-        nullptr,
-        &_vertexShader));
-
-    RETURN_IF_FAILED(_d3dDevice->CreatePixelShader(
-        pixelBlob->GetBufferPointer(),
-        pixelBlob->GetBufferSize(),
-        nullptr,
-        &_pixelShader));
-
-    RETURN_IF_FAILED(_d3dDevice->CreateInputLayout(
-        static_cast<const D3D11_INPUT_ELEMENT_DESC*>(_shaderInputLayout),
-        ARRAYSIZE(_shaderInputLayout),
-        vertexBlob->GetBufferPointer(),
-        vertexBlob->GetBufferSize(),
-        &_vertexLayout));
-
-    // Create vertex buffer for screen quad.
-    D3D11_BUFFER_DESC bd{};
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof(ShaderInput) * ARRAYSIZE(_screenQuadVertices);
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    bd.CPUAccessFlags = 0;
-
-    D3D11_SUBRESOURCE_DATA InitData{};
-    InitData.pSysMem = static_cast<const void*>(_screenQuadVertices);
-
-    RETURN_IF_FAILED(_d3dDevice->CreateBuffer(&bd, &InitData, &_screenQuadVertexBuffer));
-
-    D3D11_BUFFER_DESC pixelShaderSettingsBufferDesc{};
-    pixelShaderSettingsBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-    pixelShaderSettingsBufferDesc.ByteWidth = sizeof(_pixelShaderSettings);
-    pixelShaderSettingsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-
-    _ComputePixelShaderSettings();
-
-    D3D11_SUBRESOURCE_DATA pixelShaderSettingsInitData{};
-    pixelShaderSettingsInitData.pSysMem = &_pixelShaderSettings;
-
-    RETURN_IF_FAILED(_d3dDevice->CreateBuffer(&pixelShaderSettingsBufferDesc, &pixelShaderSettingsInitData, &_pixelShaderSettingsBuffer));
-
-    // Sampler state is needed to use texture as input to shader.
-    D3D11_SAMPLER_DESC samplerDesc{};
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.MipLODBias = 0.0f;
-    samplerDesc.MaxAnisotropy = 1;
-    samplerDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-    samplerDesc.BorderColor[0] = 0;
-    samplerDesc.BorderColor[1] = 0;
-    samplerDesc.BorderColor[2] = 0;
-    samplerDesc.BorderColor[3] = 0;
-    samplerDesc.MinLOD = 0;
-    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-
-    // Create the texture sampler state.
-    RETURN_IF_FAILED(_d3dDevice->CreateSamplerState(&samplerDesc, &_samplerState));
-
-    return S_OK;
-}
-
-// Routine Description:
-// - Puts the correct values in _pixelShaderSettings, so the struct can be
-//   passed the GPU and updates the GPU resource.
-// Arguments:
-// - <none>
-// Return Value:
-// - <none>
-void DxEngine::_ComputePixelShaderSettings() noexcept
-{
-    if (_HasTerminalEffects() && _d3dDeviceContext && _pixelShaderSettingsBuffer)
-    {
-        try
-        {
-            // Set the time
-            //  TODO:GH#7013 Grab timestamp
-            _pixelShaderSettings.Time = 0.0f;
-
-            // Set the UI Scale
-            _pixelShaderSettings.Scale = _scale;
-
-            // Set the display resolution
-            const float w = 1.0f * _displaySizePixels.width<UINT>();
-            const float h = 1.0f * _displaySizePixels.height<UINT>();
-            _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
-
-            // Set the background
-            DirectX::XMFLOAT4 background{};
-            background.x = _backgroundColor.r;
-            background.y = _backgroundColor.g;
-            background.z = _backgroundColor.b;
-            background.w = _backgroundColor.a;
-            _pixelShaderSettings.Background = background;
-
-            _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
-        }
-        CATCH_LOG();
-    }
 }
 
 // Routine Description;
@@ -661,6 +406,7 @@ try
             }
         }
 
+#ifdef __ALLOW_TERMINAL_EFFECTS
         if (_HasTerminalEffects())
         {
             const HRESULT hr = _SetupTerminalEffects();
@@ -670,7 +416,7 @@ try
                 LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
             }
         }
-
+#endif
         // With a new swap chain, mark the entire thing as invalid.
         RETURN_IF_FAILED(InvalidateAll());
 
@@ -801,6 +547,7 @@ void DxEngine::_ReleaseDeviceResources() noexcept
     {
         _haveDeviceResources = false;
 
+#ifdef __ALLOW_TERMINAL_EFFECTS
         // Destroy Terminal Effect resources
         _renderTargetView.Reset();
         _vertexShader.Reset();
@@ -810,6 +557,7 @@ void DxEngine::_ReleaseDeviceResources() noexcept
         _pixelShaderSettingsBuffer.Reset();
         _samplerState.Reset();
         _framebufferCapture.Reset();
+#endif
 
         _d2dBrushForeground.Reset();
         _d2dBrushBackground.Reset();
@@ -935,42 +683,6 @@ void DxEngine::SetCallback(std::function<void()> pfn)
 {
     _pfn = pfn;
 }
-
-bool DxEngine::GetRetroTerminalEffect() const noexcept
-{
-    return _retroTerminalEffect;
-}
-
-void DxEngine::SetRetroTerminalEffect(bool enable) noexcept
-try
-{
-    if (_retroTerminalEffect != enable)
-    {
-        _terminalEffectsEnabled = true;
-        _retroTerminalEffect = enable;
-        _recreateDeviceRequested = true;
-        LOG_IF_FAILED(InvalidateAll());
-    }
-}
-CATCH_LOG()
-
-std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const
-{
-    return _pixelShaderEffect;
-}
-
-void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
-try
-{
-    if (_pixelShaderEffect != value)
-    {
-        _terminalEffectsEnabled = true;
-        _pixelShaderEffect = value;
-        _recreateDeviceRequested = true;
-        LOG_IF_FAILED(InvalidateAll());
-    }
-}
-CATCH_LOG()
 
 void DxEngine::SetForceFullRepaintRendering(bool enable) noexcept
 try
@@ -1459,6 +1171,7 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
+#ifdef __ALLOW_TERMINAL_EFFECTS
         if (_HasTerminalEffects())
         {
             const HRESULT hr2 = _PaintTerminalEffects();
@@ -1468,7 +1181,7 @@ void DxEngine::WaitUntilCanRender() noexcept
                 LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
             }
         }
-
+#endif
         try
         {
             HRESULT hr = S_OK;
@@ -1752,53 +1465,6 @@ CATCH_RETURN()
     return S_OK;
 }
 
-// Routine Description:
-// - Paint terminal effects.
-// Arguments:
-// Return Value:
-// - S_OK or relevant DirectX error.
-[[nodiscard]] HRESULT DxEngine::_PaintTerminalEffects() noexcept
-try
-{
-    // Should have been initialized.
-    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
-
-    // Capture current frame in swap chain to a texture.
-    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
-    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&swapBuffer)));
-    _d3dDeviceContext->CopyResource(_framebufferCapture.Get(), swapBuffer.Get());
-
-    // Prepare captured texture as input resource to shader program.
-    D3D11_TEXTURE2D_DESC desc;
-    _framebufferCapture->GetDesc(&desc);
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    srvDesc.Texture2D.MipLevels = desc.MipLevels;
-    srvDesc.Format = desc.Format;
-
-    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &shaderResource));
-
-    // Render the screen quad with shader effects.
-    const UINT stride = sizeof(ShaderInput);
-    const UINT offset = 0;
-
-    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
-    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
-    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
-    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
-    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
-    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
-    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
-
-    return S_OK;
-}
-CATCH_RETURN()
 
 [[nodiscard]] bool DxEngine::_FullRepaintNeeded() const noexcept
 {
@@ -1809,7 +1475,11 @@ CATCH_RETURN()
     // Yes, this will further impact the performance of terminal effects.
     // But we're talking about running the entire display pipeline through a shader for
     // cosmetic effect, so performance isn't likely the top concern with this feature.
+#ifdef __ALLOW_TERMINAL_EFFECTS
     return _forceFullRepaintRendering || _HasTerminalEffects();
+#else
+    return _forceFullRepaintRendering;
+#endif
 }
 
 // Routine Description:
@@ -1869,8 +1539,10 @@ CATCH_RETURN()
         _drawingContext->forceGrayscaleAA = _ShouldForceGrayscaleAA();
     }
 
+#ifdef __ALLOW_TERMINAL_EFFECTS
     // Update pixel shader settings as background color might have changed
     _ComputePixelShaderSettings();
+#endif
 
     return S_OK;
 }
@@ -1927,8 +1599,10 @@ CATCH_RETURN();
 
     RETURN_IF_FAILED(InvalidateAll());
 
+#ifdef __ALLOW_TERMINAL_EFFECTS
     // Update pixel shader settings as scale might have changed
     _ComputePixelShaderSettings();
+#endif
 
     return S_OK;
 }
@@ -2518,3 +2192,367 @@ CATCH_LOG()
     _drawingContext->cursorInfo = info.cursorInfo;
     return S_OK;
 }
+
+// Terminal Effects are disable in Windows builds but in order to keep conditional code
+//  inside DxRenderer.* the API for Terminal Effects are still available but does nothing
+
+bool DxEngine::GetRetroTerminalEffect() const noexcept
+{
+#ifdef __ALLOW_TERMINAL_EFFECTS
+    return _retroTerminalEffect;
+#else
+    return false;
+#endif
+}
+
+#pragma warning(suppress : 4100) // enable not used when terminal effects are not allowed
+void DxEngine::SetRetroTerminalEffect(bool enable) noexcept
+try
+{
+#ifdef __ALLOW_TERMINAL_EFFECTS
+    if (_retroTerminalEffect != enable)
+    {
+        _terminalEffectsEnabled = true;
+        _retroTerminalEffect = enable;
+        _recreateDeviceRequested = true;
+        LOG_IF_FAILED(InvalidateAll());
+    }
+#endif
+}
+CATCH_LOG()
+
+std::optional<std::wstring> DxEngine::GetPixelShaderEffect() const
+{
+#ifdef __ALLOW_TERMINAL_EFFECTS
+    return _pixelShaderEffect;
+#else
+    return std::nullopt;
+#endif
+}
+
+#pragma warning(suppress : 4100) // value not used when terminal effects are not allowed
+void DxEngine::SetPixelShaderEffect(const std::optional<std::wstring>& value) noexcept
+try
+{
+#ifdef __ALLOW_TERMINAL_EFFECTS
+    if (_pixelShaderEffect != value)
+    {
+        _terminalEffectsEnabled = true;
+        _pixelShaderEffect = value;
+        _recreateDeviceRequested = true;
+        LOG_IF_FAILED(InvalidateAll());
+    }
+#endif
+}
+CATCH_LOG()
+
+// Routine Description:
+// - Toggles terminal effects off and on. If no terminal effect is configured has no effect
+// Arguments:
+// Return Value:
+// - Void
+void DxEngine::ToggleTerminalEffects()
+{
+#ifdef __ALLOW_TERMINAL_EFFECTS
+    _terminalEffectsEnabled = !_terminalEffectsEnabled;
+    LOG_IF_FAILED(InvalidateAll());
+#endif
+}
+
+#ifdef __ALLOW_TERMINAL_EFFECTS
+
+static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
+static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
+static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
+#pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
+static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
+    { L"RETRO", RETRO_PIXEL_SHADER },
+    { L"RETROII", RETROII_PIXEL_SHADER },
+};
+
+// Routine Description:
+// - Checks if terminal effects are enabled
+// Arguments:
+// Return Value:
+// - True if terminal effects are enabled
+bool DxEngine::_HasTerminalEffects() const noexcept
+{
+    return _terminalEffectsEnabled && (_retroTerminalEffect || _pixelShaderEffect);
+}
+
+// Routine Description:
+// - Disable terminal effects
+// Arguments:
+// Return Value:
+// - Void
+void DxEngine::_DisableTerminalEffects() noexcept
+{
+    _terminalEffectsEnabled = false;
+    _retroTerminalEffect = false;
+    _pixelShaderEffect.reset();
+}
+
+// Routine Description:
+// - Loads pixel shader source depending on _retroTerminalEffect and _pixelShaderEffect
+// Arguments:
+// Return Value:
+// - Pixel shader source code
+std::string DxEngine::_LoadPixelShaderEffect() const
+{
+    try
+    {
+        // If the user specified the legacy option retroTerminalEffect it has precendence
+        if (_retroTerminalEffect)
+        {
+            return std::string{ RETRO_PIXEL_SHADER };
+        }
+
+        // If no pixel shader effect is specified this function shouldn't end up being called.
+        //  If it happens anyway return the error shader
+        if (!_pixelShaderEffect)
+        {
+            return std::string{ ERROR_PIXEL_SHADER };
+        }
+
+        auto pixelShaderEffect = *_pixelShaderEffect;
+
+        const auto pixelShaderPreset = PIXEL_SHADER_PRESETS.find(pixelShaderEffect);
+
+        if (pixelShaderPreset != PIXEL_SHADER_PRESETS.end())
+        {
+            return std::string{ pixelShaderPreset->second };
+        }
+
+        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                             GENERIC_READ,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                             nullptr,
+                                             OPEN_EXISTING,
+                                             FILE_ATTRIBUTE_NORMAL,
+                                             nullptr) };
+
+        THROW_LAST_ERROR_IF(!hFile);
+
+        // fileSize is in bytes
+        const auto fileSize = GetFileSize(hFile.get(), nullptr);
+        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+
+        auto utf8buffer = std::vector<char>(fileSize);
+
+        DWORD bytesRead = 0;
+        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
+
+        // convert buffer to UTF-8 string
+        std::string utf8string(utf8buffer.data(), fileSize);
+
+        return utf8string;
+    }
+    catch (...)
+    {
+        // If we ran into any problems during loading pixel shader let's revert to
+        //  the error pixel shader which should "always" be able to load and indicates
+        //  to the user something went wrong
+        LOG_CAUGHT_EXCEPTION();
+        return std::string{ ERROR_PIXEL_SHADER };
+    }
+}
+
+// Routine Description:
+// - Setup D3D objects for doing shader things for terminal effects.
+// Arguments:
+// Return Value:
+// - HRESULT status.
+HRESULT DxEngine::_SetupTerminalEffects()
+{
+    auto pixelShaderSource = _LoadPixelShaderEffect();
+    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
+    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
+
+    // Setup render target.
+    RETURN_IF_FAILED(_d3dDevice->CreateRenderTargetView(swapBuffer.Get(), nullptr, &_renderTargetView));
+
+    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
+    D3D11_TEXTURE2D_DESC framebufferCaptureDesc{};
+    swapBuffer->GetDesc(&framebufferCaptureDesc);
+    WI_SetFlag(framebufferCaptureDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
+    RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_framebufferCapture));
+
+    // Setup the viewport.
+    D3D11_VIEWPORT vp;
+    vp.Width = _displaySizePixels.width<float>();
+    vp.Height = _displaySizePixels.height<float>();
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    vp.TopLeftX = 0;
+    vp.TopLeftY = 0;
+    _d3dDeviceContext->RSSetViewports(1, &vp);
+
+    // Prepare shaders.
+    auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
+    // As the pixel shader source is user provided it's possible there's a problem with it
+    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
+    //  If even the error pixel shader fails to load rely on standard exception handling
+    try
+    {
+        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
+    }
+    catch (...)
+    {
+        LOG_CAUGHT_EXCEPTION();
+        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
+    }
+
+    RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
+        vertexBlob->GetBufferPointer(),
+        vertexBlob->GetBufferSize(),
+        nullptr,
+        &_vertexShader));
+
+    RETURN_IF_FAILED(_d3dDevice->CreatePixelShader(
+        pixelBlob->GetBufferPointer(),
+        pixelBlob->GetBufferSize(),
+        nullptr,
+        &_pixelShader));
+
+    RETURN_IF_FAILED(_d3dDevice->CreateInputLayout(
+        static_cast<const D3D11_INPUT_ELEMENT_DESC*>(_shaderInputLayout),
+        ARRAYSIZE(_shaderInputLayout),
+        vertexBlob->GetBufferPointer(),
+        vertexBlob->GetBufferSize(),
+        &_vertexLayout));
+
+    // Create vertex buffer for screen quad.
+    D3D11_BUFFER_DESC bd{};
+    bd.Usage = D3D11_USAGE_DEFAULT;
+    bd.ByteWidth = sizeof(ShaderInput) * ARRAYSIZE(_screenQuadVertices);
+    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    bd.CPUAccessFlags = 0;
+
+    D3D11_SUBRESOURCE_DATA InitData{};
+    InitData.pSysMem = static_cast<const void*>(_screenQuadVertices);
+
+    RETURN_IF_FAILED(_d3dDevice->CreateBuffer(&bd, &InitData, &_screenQuadVertexBuffer));
+
+    D3D11_BUFFER_DESC pixelShaderSettingsBufferDesc{};
+    pixelShaderSettingsBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    pixelShaderSettingsBufferDesc.ByteWidth = sizeof(_pixelShaderSettings);
+    pixelShaderSettingsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+    _ComputePixelShaderSettings();
+
+    D3D11_SUBRESOURCE_DATA pixelShaderSettingsInitData{};
+    pixelShaderSettingsInitData.pSysMem = &_pixelShaderSettings;
+
+    RETURN_IF_FAILED(_d3dDevice->CreateBuffer(&pixelShaderSettingsBufferDesc, &pixelShaderSettingsInitData, &_pixelShaderSettingsBuffer));
+
+    // Sampler state is needed to use texture as input to shader.
+    D3D11_SAMPLER_DESC samplerDesc{};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.MipLODBias = 0.0f;
+    samplerDesc.MaxAnisotropy = 1;
+    samplerDesc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
+    samplerDesc.BorderColor[0] = 0;
+    samplerDesc.BorderColor[1] = 0;
+    samplerDesc.BorderColor[2] = 0;
+    samplerDesc.BorderColor[3] = 0;
+    samplerDesc.MinLOD = 0;
+    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+    // Create the texture sampler state.
+    RETURN_IF_FAILED(_d3dDevice->CreateSamplerState(&samplerDesc, &_samplerState));
+
+    return S_OK;
+}
+
+// Routine Description:
+// - Puts the correct values in _pixelShaderSettings, so the struct can be
+//   passed the GPU and updates the GPU resource.
+// Arguments:
+// - <none>
+// Return Value:
+// - <none>
+void DxEngine::_ComputePixelShaderSettings() noexcept
+{
+    if (_HasTerminalEffects() && _d3dDeviceContext && _pixelShaderSettingsBuffer)
+    {
+        try
+        {
+            // Set the time
+            //  TODO:GH#7013 Grab timestamp
+            _pixelShaderSettings.Time = 0.0f;
+
+            // Set the UI Scale
+            _pixelShaderSettings.Scale = _scale;
+
+            // Set the display resolution
+            const float w = 1.0f * _displaySizePixels.width<UINT>();
+            const float h = 1.0f * _displaySizePixels.height<UINT>();
+            _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
+
+            // Set the background
+            DirectX::XMFLOAT4 background{};
+            background.x = _backgroundColor.r;
+            background.y = _backgroundColor.g;
+            background.z = _backgroundColor.b;
+            background.w = _backgroundColor.a;
+            _pixelShaderSettings.Background = background;
+
+            _d3dDeviceContext->UpdateSubresource(_pixelShaderSettingsBuffer.Get(), 0, nullptr, &_pixelShaderSettings, 0, 0);
+        }
+        CATCH_LOG();
+    }
+}
+
+// Routine Description:
+// - Paint terminal effects.
+// Arguments:
+// Return Value:
+// - S_OK or relevant DirectX error.
+[[nodiscard]] HRESULT DxEngine::_PaintTerminalEffects() noexcept
+try
+{
+    // Should have been initialized.
+    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
+
+    // Capture current frame in swap chain to a texture.
+    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
+    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&swapBuffer)));
+    _d3dDeviceContext->CopyResource(_framebufferCapture.Get(), swapBuffer.Get());
+
+    // Prepare captured texture as input resource to shader program.
+    D3D11_TEXTURE2D_DESC desc;
+    _framebufferCapture->GetDesc(&desc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = desc.MipLevels;
+    srvDesc.Format = desc.Format;
+
+    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &shaderResource));
+
+    // Render the screen quad with shader effects.
+    const UINT stride = sizeof(ShaderInput);
+    const UINT offset = 0;
+
+    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
+    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
+    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
+    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
+    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
+    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
+    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
+
+    return S_OK;
+}
+CATCH_RETURN()
+
+#endif

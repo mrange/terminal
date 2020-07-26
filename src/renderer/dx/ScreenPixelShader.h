@@ -1,10 +1,6 @@
 #pragma once
 
-#ifdef __INSIDE_WINDOWS
-constexpr char errorPixelShaderString[] = "";
-constexpr char retroPixelShaderString[] = "";
-constexpr char retroIIPixelShaderString[] = "";
-#else
+#ifdef __ALLOW_TERMINAL_EFFECTS
 constexpr char errorPixelShaderString[] = R"(
 // Shader used to indicate something went wrong during shader loading
 Texture2D shaderTexture;

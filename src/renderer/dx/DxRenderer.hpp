@@ -3,6 +3,11 @@
 
 #pragma once
 
+#ifndef ___INSIDE_WINDOWS
+// If inside windows don't allow terminal effects
+#define __ALLOW_TERMINAL_EFFECTS
+#endif
+
 #include "../../renderer/inc/RenderEngineBase.hpp"
 
 #include <functional>
@@ -207,6 +212,7 @@ namespace Microsoft::Console::Render
         std::unique_ptr<DrawingContext> _drawingContext;
 
         // Terminal effects resources.
+#ifdef __ALLOW_TERMINAL_EFFECTS
 
         // Controls if configured terminal effects are enabled
         bool _terminalEffectsEnabled;
@@ -231,14 +237,6 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<ID3D11SamplerState> _samplerState;
         ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebufferCapture;
 
-        // Preferences and overrides
-        bool _softwareRendering;
-        bool _forceFullRepaintRendering;
-
-        D2D1_TEXT_ANTIALIAS_MODE _antialiasingMode;
-
-        float _defaultTextBackgroundOpacity;
-
         // DirectX constant buffers need to be a multiple of 16; align to pad the size.
         __declspec(align(16)) struct
         {
@@ -252,12 +250,23 @@ namespace Microsoft::Console::Render
 #pragma warning(suppress : 4324) // structure was padded due to __declspec(align())
         } _pixelShaderSettings;
 
-        [[nodiscard]] HRESULT _CreateDeviceResources(const bool createSwapChain) noexcept;
+
         bool _HasTerminalEffects() const noexcept;
         void _DisableTerminalEffects() noexcept;
         std::string _LoadPixelShaderEffect() const;
         HRESULT _SetupTerminalEffects();
         void _ComputePixelShaderSettings() noexcept;
+#endif
+
+        // Preferences and overrides
+        bool _softwareRendering;
+        bool _forceFullRepaintRendering;
+
+        D2D1_TEXT_ANTIALIAS_MODE _antialiasingMode;
+
+        float _defaultTextBackgroundOpacity;
+
+        [[nodiscard]] HRESULT _CreateDeviceResources(const bool createSwapChain) noexcept;
 
         [[nodiscard]] HRESULT _PrepareRenderTarget() noexcept;
 
