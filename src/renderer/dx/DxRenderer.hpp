@@ -250,7 +250,6 @@ namespace Microsoft::Console::Render
 #pragma warning(suppress : 4324) // structure was padded due to __declspec(align())
         } _pixelShaderSettings;
 
-
         bool _HasTerminalEffects() const noexcept;
         void _DisableTerminalEffects() noexcept;
         std::string _LoadPixelShaderEffect() const;

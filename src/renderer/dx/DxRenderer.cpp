@@ -1465,7 +1465,6 @@ CATCH_RETURN()
     return S_OK;
 }
 
-
 [[nodiscard]] bool DxEngine::_FullRepaintNeeded() const noexcept
 {
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
