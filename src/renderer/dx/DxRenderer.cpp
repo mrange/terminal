@@ -1238,14 +1238,9 @@ try
 {
     RETURN_HR_IF(E_NOT_VALID_STATE, _isPainting); // invalid to start a paint while painting.
 
-    // If someone explicitly requested differential rendering off, then we need to invalidate everything
+    // If full repaints are needed then we need to invalidate everything
     // so the entire frame is repainted.
-    //
-    // If terminal effects are on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of terminal effects.
-    // But we're talking about running the entire display pipeline through a shader for
-    // cosmetic effect, so performance isn't likely the top concern with this feature.
-    if (_forceFullRepaintRendering || _HasTerminalEffects())
+    if (_FullRepaintNeeded())
     {
         _invalidMap.set_all();
     }
@@ -1530,10 +1525,15 @@ void DxEngine::WaitUntilCanRender() noexcept
                 }
             }
 
-            // Finally copy the front image (being presented now) onto the backing buffer
-            // (where we are about to draw the next frame) so we can draw only the differences
-            // next frame.
-            RETURN_IF_FAILED(_CopyFrontToBack());
+            // If we are doing full repaints we don't need to copy front buffer to back buffer
+            if (!_FullRepaintNeeded())
+            {
+                // Finally copy the front image (being presented now) onto the backing buffer
+                // (where we are about to draw the next frame) so we can draw only the differences
+                // next frame.
+                RETURN_IF_FAILED(_CopyFrontToBack());
+            }
+
             _presentReady = false;
 
             _presentDirty.clear();
@@ -1799,6 +1799,18 @@ try
     return S_OK;
 }
 CATCH_RETURN()
+
+[[nodiscard]] bool DxEngine::_FullRepaintNeeded() const noexcept
+{
+    // If someone explicitly requested differential rendering off, then we need to invalidate everything
+    // so the entire frame is repainted.
+    //
+    // If terminal effects are on, we must invalidate everything for them to draw correctly.
+    // Yes, this will further impact the performance of terminal effects.
+    // But we're talking about running the entire display pipeline through a shader for
+    // cosmetic effect, so performance isn't likely the top concern with this feature.
+    return _forceFullRepaintRendering || _HasTerminalEffects();
+}
 
 // Routine Description:
 // - Updates the default brush colors used for drawing
