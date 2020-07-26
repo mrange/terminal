@@ -127,6 +127,7 @@ namespace Microsoft::Console::Render
     protected:
         [[nodiscard]] HRESULT _DoUpdateTitle(_In_ const std::wstring& newTitle) noexcept override;
         [[nodiscard]] HRESULT _PaintTerminalEffects() noexcept;
+        [[nodiscard]] bool _FullRepaintNeeded() const noexcept;
 
     private:
         enum class SwapChainMode
