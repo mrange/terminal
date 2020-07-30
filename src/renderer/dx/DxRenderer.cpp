@@ -352,11 +352,15 @@ HRESULT DxEngine::_SetupTerminalEffects()
     // Setup render target.
     RETURN_IF_FAILED(_d3dDevice->CreateRenderTargetView(swapBuffer.Get(), nullptr, &_renderTargetView));
 
-    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
     D3D11_TEXTURE2D_DESC framebufferCaptureDesc{};
     swapBuffer->GetDesc(&framebufferCaptureDesc);
     WI_SetFlag(framebufferCaptureDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
+
+    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
     RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_framebufferCapture));
+
+    // Setup _prevFramebufferCapture, to where we'll copy previosu frame when rendering effects.
+    RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_prevFramebufferCapture));
 
     // Setup the viewport.
     D3D11_VIEWPORT vp;
@@ -810,6 +814,7 @@ void DxEngine::_ReleaseDeviceResources() noexcept
         _pixelShaderSettingsBuffer.Reset();
         _samplerState.Reset();
         _framebufferCapture.Reset();
+        _prevFramebufferCapture.Reset();
 
         _d2dBrushForeground.Reset();
         _d2dBrushBackground.Reset();
@@ -1762,11 +1767,17 @@ try
 {
     // Should have been initialized.
     RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
+    RETURN_HR_IF(E_NOT_VALID_STATE, !_prevFramebufferCapture);
 
     // Capture current frame in swap chain to a texture.
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&swapBuffer)));
     _d3dDeviceContext->CopyResource(_framebufferCapture.Get(), swapBuffer.Get());
+
+    // Capture previous frame in swap chain to a texture.
+    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> prevSwapBuffer;
+    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(1, IID_PPV_ARGS(&prevSwapBuffer)));
+    _d3dDeviceContext->CopyResource(_prevFramebufferCapture.Get(), prevSwapBuffer.Get());
 
     // Prepare captured texture as input resource to shader program.
     D3D11_TEXTURE2D_DESC desc;
@@ -1778,12 +1789,19 @@ try
     srvDesc.Texture2D.MipLevels = desc.MipLevels;
     srvDesc.Format = desc.Format;
 
-    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &shaderResource));
+    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> frameBufferView;
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &frameBufferView));
+
+    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> prevFrameBufferView;
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_prevFramebufferCapture.Get(), &srvDesc, &prevFrameBufferView));
 
     // Render the screen quad with shader effects.
     const UINT stride = sizeof(ShaderInput);
     const UINT offset = 0;
+
+    ID3D11ShaderResourceView* shaderResources[] {
+        frameBufferView.Get(), prevFrameBufferView.Get()
+    };
 
     _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
     _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
@@ -1791,7 +1809,7 @@ try
     _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
     _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
     _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
+    _d3dDeviceContext->PSSetShaderResources(0, 2, shaderResources);
     _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
     _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
     _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
