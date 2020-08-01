@@ -53,6 +53,26 @@ Renderer::~Renderer()
 }
 
 // Routine Description:
+// - Does an optional quick paint of frame for renderers that support it (like DxRenderer)
+// Arguments:
+// - <none>
+// Return Value:
+// - HRESULT
+[[nodiscard]] HRESULT Renderer::FastPaintFrame()
+{
+    for (IRenderEngine* const pEngine : _rgpEngines)
+    {
+        if (_destructing)
+        {
+            return S_FALSE;
+        }
+        LOG_IF_FAILED(pEngine->FastPresent());
+    }
+
+    return S_OK;
+}
+
+// Routine Description:
 // - Walks through the console data structures to compose a new frame based on the data that has changed since last call and outputs it to the connected rendering engine.
 // Arguments:
 // - <none>

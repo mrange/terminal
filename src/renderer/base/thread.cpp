@@ -175,7 +175,10 @@ DWORD WINAPI RenderThread::_ThreadProc()
             if (!_fNextFrameRequested.exchange(false, std::memory_order_acq_rel))
             {
                 // Wait until a next frame is requested.
-                WaitForSingleObject(_hEvent, INFINITE);
+                while(WaitForSingleObject(_hEvent, s_FrameLimitMilliseconds) == WAIT_TIMEOUT)
+                {
+                    LOG_IF_FAILED(_pRenderer->FastPaintFrame());
+                }
             }
 
             // <--

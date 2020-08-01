@@ -45,6 +45,7 @@ namespace Microsoft::Console::Render
 
         virtual ~Renderer() override;
 
+        [[nodiscard]] HRESULT FastPaintFrame();
         [[nodiscard]] HRESULT PaintFrame();
 
         void TriggerSystemRedraw(const RECT* const prcDirtyClient) override;

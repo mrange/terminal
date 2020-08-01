@@ -56,6 +56,7 @@ static constexpr std::wstring_view FALLBACK_FONT_FACES[] = { L"Consolas", L"Luci
 static constexpr std::wstring_view FALLBACK_LOCALE = L"en-us";
 
 static constexpr std::string_view ERROR_PIXEL_SHADER{ errorPixelShaderString };
+static constexpr std::string_view NOP_PIXEL_SHADER{ nopPixelShaderString };
 static constexpr std::string_view RETRO_PIXEL_SHADER{ retroPixelShaderString };
 static constexpr std::string_view RETROII_PIXEL_SHADER{ retroIIPixelShaderString };
 #pragma warning(suppress : 26426) // The input to PIXEL_SHADER_PRESETS is constexpr
@@ -78,7 +79,6 @@ DxEngine::DxEngine() :
     _invalidMap{},
     _invalidScroll{},
     _allInvalid{ false },
-    _firstFrame{ true },
     _presentParams{ 0 },
     _presentReady{ false },
     _presentScroll{ 0 },
@@ -98,11 +98,14 @@ DxEngine::DxEngine() :
     _recreateDeviceRequested{ false },
     _terminalEffectsEnabled{ false },
     _retroTerminalEffect{ false },
-    _pixelShaderEffect{},
     _forceFullRepaintRendering{ false },
+    _pixelShaderSettings{},
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
     _defaultTextBackgroundOpacity{ 1.0f },
+    _counterFrequency{},
+    _counterStart{},
+    _pixelShaderEffect{},
     _hwndTarget{ static_cast<HWND>(INVALID_HANDLE_VALUE) },
     _sizeTarget{},
     _dpi{ USER_DEFAULT_SCREEN_DPI },
@@ -247,7 +250,7 @@ _CompileShader(
 // - True if full repaints are used
 bool DxEngine::_DoFullRepaint() const noexcept
 {
-    return _forceFullRepaintRendering || _HasTerminalEffects();
+    return _forceFullRepaintRendering;
 }
 
 // Routine Description:
@@ -292,6 +295,12 @@ std::string DxEngine::_LoadPixelShaderEffect() const
 {
     try
     {
+        // If no terminal effects are selected return the nop shader
+        if (!_HasTerminalEffects())
+        {
+            return std::string{ NOP_PIXEL_SHADER };
+        }
+
         // If the user specified the legacy option retroTerminalEffect it has precendence
         if (_retroTerminalEffect)
         {
@@ -353,20 +362,17 @@ std::string DxEngine::_LoadPixelShaderEffect() const
 // Arguments:
 // Return Value:
 // - HRESULT status.
-HRESULT DxEngine::_SetupTerminalEffects()
+[[nodiscard]] HRESULT DxEngine::_SetupTerminalEffects()
 {
+    LOG_IF_WIN32_BOOL_FALSE(QueryPerformanceFrequency(&_counterFrequency));
+    LOG_IF_WIN32_BOOL_FALSE(QueryPerformanceCounter(&_counterStart));
+
     auto pixelShaderSource = _LoadPixelShaderEffect();
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
     RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
 
     // Setup render target.
     RETURN_IF_FAILED(_d3dDevice->CreateRenderTargetView(swapBuffer.Get(), nullptr, &_renderTargetView));
-
-    // Setup _framebufferCapture, to where we'll copy current frame when rendering effects.
-    D3D11_TEXTURE2D_DESC framebufferCaptureDesc{};
-    swapBuffer->GetDesc(&framebufferCaptureDesc);
-    WI_SetFlag(framebufferCaptureDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
-    RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferCaptureDesc, nullptr, &_framebufferCapture));
 
     // Setup the viewport.
     D3D11_VIEWPORT vp;
@@ -430,8 +436,6 @@ HRESULT DxEngine::_SetupTerminalEffects()
     pixelShaderSettingsBufferDesc.ByteWidth = sizeof(_pixelShaderSettings);
     pixelShaderSettingsBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 
-    _ComputePixelShaderSettings();
-
     D3D11_SUBRESOURCE_DATA pixelShaderSettingsInitData{};
     pixelShaderSettingsInitData.pSysMem = &_pixelShaderSettings;
 
@@ -466,22 +470,30 @@ HRESULT DxEngine::_SetupTerminalEffects()
 // - <none>
 // Return Value:
 // - <none>
-void DxEngine::_ComputePixelShaderSettings() noexcept
+void DxEngine::_UpdatePixelShaderSettings() noexcept
 {
     if (_HasTerminalEffects() && _d3dDeviceContext && _pixelShaderSettingsBuffer)
     {
         try
         {
-            // Set the time
-            //  TODO:GH#7013 Grab timestamp
-            _pixelShaderSettings.Time = 0.0f;
+            LARGE_INTEGER counter{};
+            if (QueryPerformanceCounter(&counter))
+            {
+                _pixelShaderSettings.Time =
+                    static_cast<float>(counter.QuadPart - _counterStart.QuadPart) /
+                    static_cast<float>(_counterFrequency.QuadPart);
+            }
+            else
+            {
+                _pixelShaderSettings.Time = 0.0f;
+            }
 
             // Set the UI Scale
             _pixelShaderSettings.Scale = _scale;
 
             // Set the display resolution
-            const float w = 1.0f * _displaySizePixels.width<UINT>();
-            const float h = 1.0f * _displaySizePixels.height<UINT>();
+            const float w = static_cast<float>(_displaySizePixels.width<UINT>());
+            const float h = static_cast<float>(_displaySizePixels.height<UINT>());
             _pixelShaderSettings.Resolution = XMFLOAT2{ w, h };
 
             // Set the background
@@ -671,21 +683,19 @@ try
             }
         }
 
-        if (_HasTerminalEffects())
-        {
-            const HRESULT hr = _SetupTerminalEffects();
-            if (FAILED(hr))
-            {
-                _DisableTerminalEffects();
-                LOG_HR_MSG(hr, "Failed to setup terminal effects. Disabling.");
-            }
-        }
+        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
+        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&swapBuffer));
+
+        // Setup _framebuffer, to where we'll write all console graphics
+        D3D11_TEXTURE2D_DESC framebufferDesc{};
+        swapBuffer->GetDesc(&framebufferDesc);
+        WI_SetFlag(framebufferDesc.BindFlags, D3D11_BIND_SHADER_RESOURCE);
+        RETURN_IF_FAILED(_d3dDevice->CreateTexture2D(&framebufferDesc, nullptr, &_framebuffer));
+
+        RETURN_IF_FAILED(_SetupTerminalEffects());
 
         // With a new swap chain, mark the entire thing as invalid.
         RETURN_IF_FAILED(InvalidateAll());
-
-        // This is our first frame on this new target.
-        _firstFrame = true;
 
         RETURN_IF_FAILED(_PrepareRenderTarget());
     }
@@ -738,8 +748,7 @@ static constexpr D2D1_ALPHA_MODE _dxgiAlphaToD2d1Alpha(DXGI_ALPHA_MODE mode) noe
 {
     try
     {
-        // Pull surface out of swap chain.
-        RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&_dxgiSurface)));
+        RETURN_IF_FAILED(_framebuffer->QueryInterface(IID_PPV_ARGS(&_dxgiSurface)));
 
         // Make a bitmap and bind it to the swap chain surface
         const auto bitmapProperties = D2D1::BitmapProperties1(
@@ -811,7 +820,14 @@ void DxEngine::_ReleaseDeviceResources() noexcept
     {
         _haveDeviceResources = false;
 
+        // Terminal effects resources
+        _renderTargetView.Reset();
+        _vertexShader.Reset();
+        _pixelShader.Reset();
+        _vertexLayout.Reset();
+        _screenQuadVertexBuffer.Reset();
         _pixelShaderSettingsBuffer.Reset();
+        _samplerState.Reset();
 
         _d2dBrushForeground.Reset();
         _d2dBrushBackground.Reset();
@@ -822,6 +838,8 @@ void DxEngine::_ReleaseDeviceResources() noexcept
         {
             _d2dDeviceContext->EndDraw();
         }
+
+        _framebuffer.Reset();
 
         _d2dDeviceContext.Reset();
 
@@ -1117,6 +1135,9 @@ try
 {
     RETURN_HR_IF(E_INVALIDARG, !pcoordDelta);
 
+    // TODO: Reimplement invalidate scroll by scrolling the framebuffer texture
+    RETURN_IF_FAILED(InvalidateAll());
+    /*
     const til::point deltaCells{ *pcoordDelta };
 
     if (!_allInvalid)
@@ -1129,6 +1150,7 @@ try
             _allInvalid = _IsAllInvalid();
         }
     }
+    */
 
     return S_OK;
 }
@@ -1145,16 +1167,6 @@ try
 {
     _invalidMap.set_all();
     _allInvalid = true;
-
-    // Since everything is invalidated here, mark this as a "first frame", so
-    // that we won't use incremental drawing on it. The caller of this intended
-    // for _everything_ to get redrawn, so setting _firstFrame will force us to
-    // redraw the entire frame. This will make sure that things like the gutters
-    // get cleared correctly.
-    //
-    // Invalidating everything is supposed to happen with resizes of the
-    // entire canvas, changes of the font, and other such adjustments.
-    _firstFrame = true;
     return S_OK;
 }
 CATCH_RETURN();
@@ -1242,11 +1254,6 @@ try
 
     // If someone explicitly requested differential rendering off, then we need to invalidate everything
     // so the entire frame is repainted.
-    //
-    // If terminal effects are on, we must invalidate everything for them to draw correctly.
-    // Yes, this will further impact the performance of terminal effects.
-    // But we're talking about running the entire display pipeline through a shader for
-    // cosmetic effect, so performance isn't likely the top concern with this feature.
     if (_DoFullRepaint())
     {
         _invalidMap.set_all();
@@ -1296,9 +1303,6 @@ try
 
             // And persist the new size.
             _displaySizePixels = clientSize;
-
-            // Mark this as the first frame on the new target. We can't use incremental drawing on the first frame.
-            _firstFrame = true;
         }
 
         _d2dDeviceContext->BeginDraw();
@@ -1351,6 +1355,8 @@ try
 
         if (SUCCEEDED(hr))
         {
+            // TODO: Reimplement invalidate scroll by scrolling the framebuffer texture
+            /*
             if (_invalidScroll != til::point{ 0, 0 })
             {
                 // Copy `til::rectangles` into RECT map.
@@ -1391,6 +1397,7 @@ try
                     _presentParams.pScrollOffset = nullptr;
                 }
             }
+            */
 
             _presentReady = true;
         }
@@ -1409,35 +1416,6 @@ try
     return hr;
 }
 CATCH_RETURN()
-
-// Routine Description:
-// - Copies the front surface of the swap chain (the one being displayed)
-//   to the back surface of the swap chain (the one we draw on next)
-//   so we can draw on top of what's already there.
-// Arguments:
-// - <none>
-// Return Value:
-// - Any DirectX error, a memory error, etc.
-[[nodiscard]] HRESULT DxEngine::_CopyFrontToBack() noexcept
-{
-    // Only copy front to back if partial updates are allowed
-    if (!_DoFullRepaint())
-    {
-        try
-        {
-            Microsoft::WRL::ComPtr<ID3D11Resource> backBuffer;
-            Microsoft::WRL::ComPtr<ID3D11Resource> frontBuffer;
-
-            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)));
-            RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(1, IID_PPV_ARGS(&frontBuffer)));
-
-            _d3dDeviceContext->CopyResource(backBuffer.Get(), frontBuffer.Get());
-        }
-        CATCH_RETURN();
-    }
-
-    return S_OK;
-}
 
 // Method Description:
 // - Blocks until the engine is able to render without blocking.
@@ -1459,6 +1437,48 @@ void DxEngine::WaitUntilCanRender() noexcept
     }
 }
 
+[[nodiscard]] HRESULT DxEngine::_RenderToSwapChain() noexcept
+try
+{
+    // Should have been initialized.
+    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebuffer);
+
+    D3D11_TEXTURE2D_DESC desc;
+    _framebuffer->GetDesc(&desc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = desc.MipLevels;
+    srvDesc.Format = desc.Format;
+
+    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
+    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebuffer.Get(), &srvDesc, &shaderResource));
+
+    // Render the screen quad with shader effects.
+    const UINT stride = sizeof(ShaderInput);
+    const UINT offset = 0;
+
+    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
+    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
+    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
+    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
+    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
+    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
+    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
+    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
+
+    return S_OK;
+}
+CATCH_RETURN()
+
+[[nodiscard]] HRESULT DxEngine::FastPresent() noexcept
+{
+    return Present();
+}
+
 // Routine Description:
 // - Takes queued drawing information and presents it to the screen.
 // - This is separated out so it can be done outside the lock as it's expensive.
@@ -1470,53 +1490,18 @@ void DxEngine::WaitUntilCanRender() noexcept
 {
     if (_presentReady)
     {
-        if (_HasTerminalEffects())
-        {
-            const HRESULT hr2 = _PaintTerminalEffects();
-            if (FAILED(hr2))
-            {
-                _DisableTerminalEffects();
-                LOG_HR_MSG(hr2, "Failed to paint terminal effects. Disabling.");
-            }
-        }
-
         try
         {
-            HRESULT hr = S_OK;
+            // Updates the pixel shader resource (including time)
+            _UpdatePixelShaderSettings();
 
-            bool recreate = false;
+            // Renders framebuffer texture + potential pixel shader effects
+            LOG_IF_FAILED(_RenderToSwapChain());
 
-            // On anything but the first frame, try partial presentation.
-            // We'll do it first because if it fails, we'll try again with full presentation.
-            if (!_firstFrame)
-            {
-                hr = _dxgiSwapChain->Present1(1, 0, &_presentParams);
+            const HRESULT hr = _dxgiSwapChain->Present(1, 0);
 
-                // These two error codes are indicated for destroy-and-recreate
-                // If we were told to destroy-and-recreate, we're going to skip straight into doing that
-                // and not try again with full presentation.
-                recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
-
-                // Log this as we actually don't expect it to happen, we just will try again
-                // below for robustness of our drawing.
-                if (FAILED(hr) && !recreate)
-                {
-                    LOG_HR(hr);
-                }
-            }
-
-            // If it's the first frame through, we cannot do partial presentation.
-            // Also if partial presentation failed above and we weren't told to skip straight to
-            // device recreation.
-            // In both of these circumstances, do a full presentation.
-            if (_firstFrame || (FAILED(hr) && !recreate))
-            {
-                hr = _dxgiSwapChain->Present(1, 0);
-                _firstFrame = false;
-
-                // These two error codes are indicated for destroy-and-recreate
-                recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
-            }
+            // These two error codes are indicated for destroy-and-recreate
+            const bool recreate = hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
 
             // Now check for failure cases from either presentation mode.
             if (FAILED(hr))
@@ -1535,12 +1520,6 @@ void DxEngine::WaitUntilCanRender() noexcept
                     FAIL_FAST_HR(hr);
                 }
             }
-
-            // Finally copy the front image (being presented now) onto the backing buffer
-            // (where we are about to draw the next frame) so we can draw only the differences
-            // next frame.
-            RETURN_IF_FAILED(_CopyFrontToBack());
-            _presentReady = false;
 
             _presentDirty.clear();
             _presentOffset = { 0 };
@@ -1759,54 +1738,6 @@ CATCH_RETURN()
 }
 
 // Routine Description:
-// - Paint terminal effects.
-// Arguments:
-// Return Value:
-// - S_OK or relevant DirectX error.
-[[nodiscard]] HRESULT DxEngine::_PaintTerminalEffects() noexcept
-try
-{
-    // Should have been initialized.
-    RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
-
-    // Capture current frame in swap chain to a texture.
-    ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
-    RETURN_IF_FAILED(_dxgiSwapChain->GetBuffer(0, IID_PPV_ARGS(&swapBuffer)));
-    _d3dDeviceContext->CopyResource(_framebufferCapture.Get(), swapBuffer.Get());
-
-    // Prepare captured texture as input resource to shader program.
-    D3D11_TEXTURE2D_DESC desc;
-    _framebufferCapture->GetDesc(&desc);
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    srvDesc.Texture2D.MipLevels = desc.MipLevels;
-    srvDesc.Format = desc.Format;
-
-    ::Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
-    RETURN_IF_FAILED(_d3dDevice->CreateShaderResourceView(_framebufferCapture.Get(), &srvDesc, &shaderResource));
-
-    // Render the screen quad with shader effects.
-    const UINT stride = sizeof(ShaderInput);
-    const UINT offset = 0;
-
-    _d3dDeviceContext->OMSetRenderTargets(1, _renderTargetView.GetAddressOf(), nullptr);
-    _d3dDeviceContext->IASetVertexBuffers(0, 1, _screenQuadVertexBuffer.GetAddressOf(), &stride, &offset);
-    _d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    _d3dDeviceContext->IASetInputLayout(_vertexLayout.Get());
-    _d3dDeviceContext->VSSetShader(_vertexShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShader(_pixelShader.Get(), nullptr, 0);
-    _d3dDeviceContext->PSSetShaderResources(0, 1, shaderResource.GetAddressOf());
-    _d3dDeviceContext->PSSetSamplers(0, 1, _samplerState.GetAddressOf());
-    _d3dDeviceContext->PSSetConstantBuffers(0, 1, _pixelShaderSettingsBuffer.GetAddressOf());
-    _d3dDeviceContext->Draw(ARRAYSIZE(_screenQuadVertices), 0);
-
-    return S_OK;
-}
-CATCH_RETURN()
-
-// Routine Description:
 // - Updates the default brush colors used for drawing
 // Arguments:
 // - textAttributes - Text attributes to use for the brush color
@@ -1863,9 +1794,6 @@ CATCH_RETURN()
         _drawingContext->forceGrayscaleAA = _ShouldForceGrayscaleAA();
     }
 
-    // Update pixel shader settings as background color might have changed
-    _ComputePixelShaderSettings();
-
     return S_OK;
 }
 
@@ -1920,9 +1848,6 @@ CATCH_RETURN();
     _scale = _dpi / static_cast<float>(USER_DEFAULT_SCREEN_DPI);
 
     RETURN_IF_FAILED(InvalidateAll());
-
-    // Update pixel shader settings as scale might have changed
-    _ComputePixelShaderSettings();
 
     return S_OK;
 }

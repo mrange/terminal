@@ -85,6 +85,7 @@ namespace Microsoft::Console::Render
         [[nodiscard]] HRESULT EndPaint() noexcept override;
 
         void WaitUntilCanRender() noexcept override;
+        [[nodiscard]] HRESULT FastPresent() noexcept override;
         [[nodiscard]] HRESULT Present() noexcept override;
 
         [[nodiscard]] HRESULT ScrollFrame() noexcept override;
@@ -126,7 +127,6 @@ namespace Microsoft::Console::Render
 
     protected:
         [[nodiscard]] HRESULT _DoUpdateTitle(_In_ const std::wstring& newTitle) noexcept override;
-        [[nodiscard]] HRESULT _PaintTerminalEffects() noexcept;
 
     private:
         enum class SwapChainMode
@@ -159,7 +159,6 @@ namespace Microsoft::Console::Render
         D2D1_COLOR_F _backgroundColor;
         D2D1_COLOR_F _selectionBackground;
 
-        bool _firstFrame;
         bool _invalidateFullRows;
         til::bitmap _invalidMap;
         til::point _invalidScroll;
@@ -205,6 +204,8 @@ namespace Microsoft::Console::Render
         wil::unique_handle _swapChainFrameLatencyWaitableObject;
         std::unique_ptr<DrawingContext> _drawingContext;
 
+        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebuffer;
+
         // Terminal effects resources.
 
         // Controls if configured terminal effects are enabled
@@ -228,7 +229,6 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<ID3D11Buffer> _screenQuadVertexBuffer;
         ::Microsoft::WRL::ComPtr<ID3D11Buffer> _pixelShaderSettingsBuffer;
         ::Microsoft::WRL::ComPtr<ID3D11SamplerState> _samplerState;
-        ::Microsoft::WRL::ComPtr<ID3D11Texture2D> _framebufferCapture;
 
         // Preferences and overrides
         bool _softwareRendering;
@@ -238,6 +238,8 @@ namespace Microsoft::Console::Render
 
         float _defaultTextBackgroundOpacity;
 
+        LARGE_INTEGER _counterFrequency;
+        LARGE_INTEGER _counterStart;
         // DirectX constant buffers need to be a multiple of 16; align to pad the size.
         __declspec(align(16)) struct
         {
@@ -256,8 +258,9 @@ namespace Microsoft::Console::Render
         bool _HasTerminalEffects() const noexcept;
         void _DisableTerminalEffects() noexcept;
         std::string _LoadPixelShaderEffect() const;
-        HRESULT _SetupTerminalEffects();
-        void _ComputePixelShaderSettings() noexcept;
+        [[nodiscard]] HRESULT _SetupTerminalEffects();
+        void _UpdatePixelShaderSettings() noexcept;
+        [[nodiscard]] HRESULT _RenderToSwapChain() noexcept;
 
         [[nodiscard]] HRESULT _PrepareRenderTarget() noexcept;
 
@@ -269,8 +272,6 @@ namespace Microsoft::Console::Render
             _In_reads_(StringLength) PCWCHAR String,
             _In_ size_t StringLength,
             _Out_ IDWriteTextLayout** ppTextLayout) noexcept;
-
-        [[nodiscard]] HRESULT _CopyFrontToBack() noexcept;
 
         [[nodiscard]] HRESULT _EnableDisplayAccess(const bool outputEnabled) noexcept;
 
