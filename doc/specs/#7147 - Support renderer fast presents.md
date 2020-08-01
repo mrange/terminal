@@ -82,7 +82,7 @@ _(no change expected)_
 
 ### Compatibility
 
-Uses a large footprint of DX11. The pixelshader could be made optional and we instead just copy the texture resource to the backbuffer on present when no terminal effects.
+Uses a larger footprint of DX11. The pixelshader could be made optional and we instead just copy the texture resource to the backbuffer on present when no terminal effects.
 
 ### Performance, Power, and Efficiency
 
