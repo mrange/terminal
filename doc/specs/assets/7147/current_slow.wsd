@@ -1,0 +1,31 @@
+# https://www.websequencediagrams.com/
+title Current "slow" present workflow
+
+Renderer->DxRenderer: Paint graphics
+
+note left of DX11: Terminal effects turns off partial updates
+alt Is partial updates supported?
+  DxRenderer->DX11: Draw graphics over partial backbuffer
+else
+  DxRenderer->DX11: Draw graphics over entire backbuffer
+end
+
+DxRenderer-->Renderer: Paint graphics done
+
+Renderer->DxRenderer: Present graphics
+alt Are terminal effects enabled?
+  DxRenderer->DX11: Copy backbuffer to texture
+  DxRenderer->DX11: Set texture as input to pixel shader
+  DxRenderer->DX11: Draw quad with pixelshader and texture to backbuffer
+end
+
+alt Is partial updates supported?
+  DxRenderer->DX11: Do partial present
+else
+  DxRenderer->DX11: Do full present
+end
+
+note left of DX11: To support partial updates
+DxRenderer->DX11: Copy frontbuffer to backbuffer
+
+DxRenderer-->Renderer: Present graphics done
