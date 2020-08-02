@@ -64,6 +64,38 @@ static const std::map<std::wstring_view, std::string_view> PIXEL_SHADER_PRESETS{
     { L"RETROII", RETROII_PIXEL_SHADER },
 };
 
+// Routine Description:
+// - Reads pixel shader source code from file
+// Arguments:
+// Return Value:
+// - The pixel shader source code
+static std::string _ReadPixelShaderSource(const std::wstring& pixelShaderEffect)
+{
+    wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
+                                            GENERIC_READ,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                            nullptr,
+                                            OPEN_EXISTING,
+                                            FILE_ATTRIBUTE_NORMAL,
+                                            nullptr) };
+
+    THROW_LAST_ERROR_IF(!hFile);
+
+    // fileSize is in bytes
+    const auto fileSize = GetFileSize(hFile.get(), nullptr);
+    THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+
+    auto utf8buffer = std::vector<char>(fileSize);
+
+    DWORD bytesRead = 0;
+    THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
+
+    // convert buffer to UTF-8 string
+    std::string utf8string(utf8buffer.data(), fileSize);
+
+    return utf8string;
+}
+
 using namespace Microsoft::Console::Render;
 using namespace Microsoft::Console::Types;
 
@@ -245,7 +277,7 @@ _CompileShader(
 // Arguments:
 // Return Value:
 // - True if terminal effects are enabled
-bool DxEngine::_HasTerminalEffects() const noexcept
+[[nodiscard]] bool DxEngine::_HasTerminalEffects() const noexcept
 {
     return _terminalEffectsEnabled && (_retroTerminalEffect || _pixelShaderEffect);
 }
@@ -278,10 +310,13 @@ void DxEngine::ToggleTerminalEffects()
 // Arguments:
 // Return Value:
 // - Pixel shader source code
-std::string DxEngine::_LoadPixelShaderEffect() const
+[[nodiscard]] std::string DxEngine::_LoadPixelShaderEffect()
 {
     try
     {
+        _pixelShaderSourceObserver.reset();
+        _pixelShaderSourceChanged.store(false);
+
         // If the user specified the legacy option retroTerminalEffect it has precendence
         if (_retroTerminalEffect)
         {
@@ -295,7 +330,7 @@ std::string DxEngine::_LoadPixelShaderEffect() const
             return std::string{ ERROR_PIXEL_SHADER };
         }
 
-        auto pixelShaderEffect = *_pixelShaderEffect;
+        const auto& pixelShaderEffect = *_pixelShaderEffect;
 
         const auto pixelShaderPreset = PIXEL_SHADER_PRESETS.find(pixelShaderEffect);
 
@@ -304,29 +339,38 @@ std::string DxEngine::_LoadPixelShaderEffect() const
             return std::string{ pixelShaderPreset->second };
         }
 
-        wil::unique_hfile hFile{ CreateFileW(pixelShaderEffect.c_str(),
-                                             GENERIC_READ,
-                                             FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                             nullptr,
-                                             OPEN_EXISTING,
-                                             FILE_ATTRIBUTE_NORMAL,
-                                             nullptr) };
+        auto pixelShaderSource = _ReadPixelShaderSource(pixelShaderEffect);
 
-        THROW_LAST_ERROR_IF(!hFile);
+        std::filesystem::path pixelShaderSourcePath{ pixelShaderEffect };
+        std::filesystem::path pixelShaderSourceFolder{ pixelShaderSourcePath.parent_path() };
+        std::filesystem::path pixelShaderSourceName{ pixelShaderSourcePath.filename() };
 
-        // fileSize is in bytes
-        const auto fileSize = GetFileSize(hFile.get(), nullptr);
-        THROW_LAST_ERROR_IF(fileSize == INVALID_FILE_SIZE);
+        _pixelShaderSourceObserver.create(
+            pixelShaderSourceFolder.c_str(),
+            false,
+            wil::FolderChangeEvents::All,
+            [this, pixelShaderSourceName](wil::FolderChangeEvent event, PCWSTR fileModified) {
+                // We want file modifications, AND when files are renamed.
+                // This second case will oftentimes happen with text
+                // editors, who will write a temp file, then rename it to be the
+                // actual file you wrote. So listen for that too.
+                if (!(event == wil::FolderChangeEvent::Modified ||
+                        event == wil::FolderChangeEvent::RenameNewName))
+                {
+                    return;
+                }
 
-        auto utf8buffer = std::vector<char>(fileSize);
+                std::filesystem::path modifiedFilePath{ fileModified };
 
-        DWORD bytesRead = 0;
-        THROW_LAST_ERROR_IF(!ReadFile(hFile.get(), utf8buffer.data(), fileSize, &bytesRead, nullptr));
+                const auto modifiedName = modifiedFilePath.filename();
 
-        // convert buffer to UTF-8 string
-        std::string utf8string(utf8buffer.data(), fileSize);
+                if (pixelShaderSourceName == modifiedName)
+                {
+                    this->_pixelShaderSourceChanged.store(true);
+                }
+            });
 
-        return utf8string;
+        return pixelShaderSource;
     }
     catch (...)
     {
@@ -339,11 +383,75 @@ std::string DxEngine::_LoadPixelShaderEffect() const
 }
 
 // Routine Description:
+// - Refreshes the pixel shader resource if the backing file has changed
+// Arguments:
+// Return Value:
+// - S_OK if pixel shader was refreshed
+[[nodiscard]] HRESULT DxEngine::_RefreshPixelShaderSource() noexcept
+try
+{
+    _pixelShaderSourceChanged.store(false);
+
+    // Only valid if a pixel shader effect is set
+    if (!_pixelShaderEffect)
+    {
+        return S_FALSE;
+    }
+
+    const auto& pixelShaderEffect = *_pixelShaderEffect;
+
+    // If _pixelShaderSourceObserver is not set the pixel shader effect is not a file
+    if (!_pixelShaderSourceObserver)
+    {
+        return S_FALSE;
+    }
+
+    auto pixelShaderSource = _ReadPixelShaderSource(pixelShaderEffect);
+
+    return _CreatePixelShader(pixelShaderSource, _pixelShader);
+}
+CATCH_RETURN();
+
+// Routine Description:
+// - Creates a pixel shader resource from pixel shader source, updates pixelShader IIF creation was successful
+// Arguments:
+// Return Value:
+// - S_OK if pixel shader was created
+[[nodiscard]] HRESULT DxEngine::_CreatePixelShader(const std::string& pixelShaderSource, ::Microsoft::WRL::ComPtr<ID3D11PixelShader>& pixelShader) noexcept
+{
+    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
+    // As the pixel shader source is user provided it's possible there's a problem with it
+    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
+    //  If even the error pixel shader fails to load rely on standard exception handling
+    try
+    {
+        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
+    }
+    catch (...)
+    {
+        LOG_CAUGHT_EXCEPTION();
+        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
+    }
+
+    ::Microsoft::WRL::ComPtr<ID3D11PixelShader> ps;
+
+    RETURN_IF_FAILED(_d3dDevice->CreatePixelShader(
+        pixelBlob->GetBufferPointer(),
+        pixelBlob->GetBufferSize(),
+        nullptr,
+        &ps));
+
+    pixelShader = ps;
+
+    return S_OK;
+}
+
+// Routine Description:
 // - Setup D3D objects for doing shader things for terminal effects.
 // Arguments:
 // Return Value:
 // - HRESULT status.
-HRESULT DxEngine::_SetupTerminalEffects()
+[[nodiscard]] HRESULT DxEngine::_SetupTerminalEffects()
 {
     auto pixelShaderSource = _LoadPixelShaderEffect();
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;
@@ -370,19 +478,6 @@ HRESULT DxEngine::_SetupTerminalEffects()
 
     // Prepare shaders.
     auto vertexBlob = _CompileShader(screenVertexShaderString, "vs_5_0");
-    Microsoft::WRL::ComPtr<ID3DBlob> pixelBlob;
-    // As the pixel shader source is user provided it's possible there's a problem with it
-    //  so load it inside a try catch, on any error log and fallback on the error pixel shader
-    //  If even the error pixel shader fails to load rely on standard exception handling
-    try
-    {
-        pixelBlob = _CompileShader(pixelShaderSource, "ps_5_0");
-    }
-    catch (...)
-    {
-        LOG_CAUGHT_EXCEPTION();
-        pixelBlob = _CompileShader(std::string{ ERROR_PIXEL_SHADER }, "ps_5_0");
-    }
 
     RETURN_IF_FAILED(_d3dDevice->CreateVertexShader(
         vertexBlob->GetBufferPointer(),
@@ -390,11 +485,7 @@ HRESULT DxEngine::_SetupTerminalEffects()
         nullptr,
         &_vertexShader));
 
-    RETURN_IF_FAILED(_d3dDevice->CreatePixelShader(
-        pixelBlob->GetBufferPointer(),
-        pixelBlob->GetBufferSize(),
-        nullptr,
-        &_pixelShader));
+    RETURN_IF_FAILED(_CreatePixelShader(pixelShaderSource, _pixelShader));
 
     RETURN_IF_FAILED(_d3dDevice->CreateInputLayout(
         static_cast<const D3D11_INPUT_ELEMENT_DESC*>(_shaderInputLayout),
@@ -802,6 +893,7 @@ void DxEngine::_ReleaseDeviceResources() noexcept
         _haveDeviceResources = false;
 
         // Destroy Terminal Effect resources
+        _pixelShaderSourceObserver.reset();
         _renderTargetView.Reset();
         _vertexShader.Reset();
         _pixelShader.Reset();
@@ -1783,6 +1875,11 @@ try
 {
     // Should have been initialized.
     RETURN_HR_IF(E_NOT_VALID_STATE, !_framebufferCapture);
+
+    if (_pixelShaderSourceChanged.load())
+    {
+        LOG_IF_FAILED(_RefreshPixelShaderSource());
+    }
 
     // Capture current frame in swap chain to a texture.
     ::Microsoft::WRL::ComPtr<ID3D11Texture2D> swapBuffer;

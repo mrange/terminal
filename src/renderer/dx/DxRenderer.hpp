@@ -231,6 +231,9 @@ namespace Microsoft::Console::Render
         //  Allows user to load a pixel shader from a few presets or from a file path
         std::optional<std::wstring> _pixelShaderEffect;
 
+        wil::unique_folder_change_reader_nothrow _pixelShaderSourceObserver;
+        std::atomic<bool> _pixelShaderSourceChanged;
+
         // DX resources needed for terminal effects
         ::Microsoft::WRL::ComPtr<ID3D11RenderTargetView> _renderTargetView;
         ::Microsoft::WRL::ComPtr<ID3D11VertexShader> _vertexShader;
@@ -263,10 +266,12 @@ namespace Microsoft::Console::Render
         } _pixelShaderSettings;
 
         [[nodiscard]] HRESULT _CreateDeviceResources(const bool createSwapChain) noexcept;
-        bool _HasTerminalEffects() const noexcept;
+        [[nodiscard]] bool _HasTerminalEffects() const noexcept;
         void _DisableTerminalEffects() noexcept;
-        std::string _LoadPixelShaderEffect() const;
-        HRESULT _SetupTerminalEffects();
+        [[nodiscard]] std::string _LoadPixelShaderEffect();
+        [[nodiscard]] HRESULT _RefreshPixelShaderSource() noexcept;
+        [[nodiscard]] HRESULT _CreatePixelShader(const std::string& pixelShaderSource, ::Microsoft::WRL::ComPtr<ID3D11PixelShader>& pixelShader) noexcept;
+        [[nodiscard]] HRESULT _SetupTerminalEffects();
         void _ComputePixelShaderSettings() noexcept;
 
         [[nodiscard]] HRESULT _PrepareRenderTarget() noexcept;
