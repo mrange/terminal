@@ -1,5 +1,4 @@
-// In order to run in KodeLife (great Shader IDE and free with some nagging),
-//  define the following:
+// In order to us Kodelife (a shader IDE), uncomment the following line:
 // #define KODELIFE
 
 #ifdef KODELIFE
@@ -23,22 +22,18 @@ cbuffer PixelShaderSettings {
   float4 Background;
 };
 
-float2 resolution() {
-  return Resolution;
-}
-
-// HSV to RGB conversion
+// ----------------------------------------------------------------------------
+// HSV to RGB and back
 //  From: https://stackoverflow.com/questions/15095909/from-rgb-to-hsv-in-opengl-glsl
-//  sam hocevar claims he is the author of these in particular
+//  Blog: http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl
+//  Note: Stackoverflow TOS in 2013 required all user content to be licensed under CC BY-SA 3.0.
+//  Copyright (C) 2013 Sam Hocevar. This work is licensed under a CC BY-SA 3.0 license.
 float3 hsv2rgb(float3 c) {
   const float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
   float3 p = abs(frac(c.xxx + K.xyz) * 6.0 - K.www);
   return c.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
-// RGB to HSV conversion
-//  From: https://stackoverflow.com/questions/15095909/from-rgb-to-hsv-in-opengl-glsl
-//  sam hocevar claims he is the author of these in particular
 float3 rgb2hsv(float3 c) {
   const float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
   float4 p = lerp(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
@@ -48,9 +43,15 @@ float3 rgb2hsv(float3 c) {
   float e = 1.0e-10;
   return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
+// ----------------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------
 // Ray sphere intersection
-//  From: https://iquilezles.org/www/articles/spherefunctions/spherefunctions.htm
+//  From: https://www.shadertoy.com/view/4d2XWV
+//  Blog: https://www.iquilezles.org/www/articles/intersectors/intersectors.htm
+// The MIT License
+// Copyright (C) 2014 Inigo Quilez
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 float raySphere(float3 ro, float3 rd, float4 sph) {
   float3 oc = ro - sph.xyz;
   float b = dot(oc, rd);
@@ -60,6 +61,7 @@ float raySphere(float3 ro, float3 rd, float4 sph) {
   h = sqrt(h);
   return -b - h;
 }
+// ----------------------------------------------------------------------------
 
 float psin(float a) {
   return 0.5+0.5*sin(a);
@@ -146,7 +148,7 @@ float3 color(float2 reso, float3 ro, float2 p) {
 }
 
 float4 MAIN(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
-  float2 reso = resolution();
+  float2 reso = Resolution;
   float2 q = tex;
   float2 p = -1. + 2. * q;
   p.x *= reso.x/reso.y;
