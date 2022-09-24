@@ -66,6 +66,9 @@ namespace Microsoft::Console::Render
         std::wstring_view GetPixelShaderPath() noexcept override;
         void SetPixelShaderPath(std::wstring_view value) noexcept override;
 
+        std::wstring_view GetPixelShaderImagePath() noexcept override;
+        void SetPixelShaderImagePath(std::wstring_view value) noexcept override;
+
         void SetForceFullRepaintRendering(bool enable) noexcept override;
 
         void SetSoftwareRendering(bool enable) noexcept override;
@@ -248,6 +251,7 @@ namespace Microsoft::Console::Render
         // Experimental and pixel shader effect
         //  Allows user to load a pixel shader from a few presets or from a file path
         std::wstring _pixelShaderPath;
+        std::wstring _pixelShaderImagePath;
         bool _pixelShaderLoaded{ false };
 
         std::chrono::steady_clock::time_point _shaderStartTime;

@@ -95,6 +95,7 @@ DxEngine::DxEngine() :
     _terminalEffectsEnabled{ false },
     _retroTerminalEffect{ false },
     _pixelShaderPath{},
+    _pixelShaderImagePath{},
     _forceFullRepaintRendering{ false },
     _softwareRendering{ false },
     _antialiasingMode{ D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE },
@@ -1017,6 +1018,11 @@ std::wstring_view DxEngine::GetPixelShaderPath() noexcept
     return _pixelShaderPath;
 }
 
+std::wstring_view DxEngine::GetPixelShaderImagePath() noexcept
+{
+    return _pixelShaderImagePath;
+}
+
 void DxEngine::SetPixelShaderPath(std::wstring_view value) noexcept
 try
 {
@@ -1025,6 +1031,18 @@ try
         // Enable shader effects if the path isn't empty. Otherwise leave it untouched.
         _terminalEffectsEnabled = value.empty() ? _terminalEffectsEnabled : true;
         _pixelShaderPath = std::wstring{ value };
+        _recreateDeviceRequested = true;
+        LOG_IF_FAILED(InvalidateAll());
+    }
+}
+CATCH_LOG()
+
+void DxEngine::SetPixelShaderImagePath(std::wstring_view value) noexcept
+try
+{
+    if (_pixelShaderImagePath != value)
+    {
+        _pixelShaderImagePath = std::wstring{ value };
         _recreateDeviceRequested = true;
         LOG_IF_FAILED(InvalidateAll());
     }

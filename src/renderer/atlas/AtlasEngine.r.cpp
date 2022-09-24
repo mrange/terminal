@@ -243,7 +243,18 @@ void AtlasEngine::_renderWithCustomShader() const
         // PS: Pixel Shader
         _r.deviceContext->PSSetShader(_r.customPixelShader.get(), nullptr, 0);
         _r.deviceContext->PSSetConstantBuffers(0, 1, _r.customShaderConstantBuffer.addressof());
-        _r.deviceContext->PSSetShaderResources(0, 1, _r.customOffscreenTextureView.addressof());
+        if (_r.customShaderTexture.TextureView)
+        {
+            ID3D11ShaderResourceView* const resourceViews[]{
+                _r.customOffscreenTextureView.get(),
+                _r.customShaderTexture.TextureView.get(),
+            };
+            _r.deviceContext->PSSetShaderResources(0, 2, static_cast<ID3D11ShaderResourceView* const*>(resourceViews));
+        }
+        else
+        {
+            _r.deviceContext->PSSetShaderResources(0, 1, _r.customOffscreenTextureView.addressof());
+        }
         _r.deviceContext->PSSetSamplers(0, 1, _r.customShaderSamplerState.addressof());
 
         _r.deviceContext->Draw(4, 0);
