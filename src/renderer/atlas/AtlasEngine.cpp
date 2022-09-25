@@ -166,7 +166,7 @@ namespace
         return DXGI_FORMAT_UNKNOWN;
     }
 
-    static size_t WICBitsPerPixel(
+    static UINT WICBitsPerPixel(
         IWICImagingFactory* wic,
         REFGUID targetGuid)
     {
@@ -301,12 +301,12 @@ namespace
             const float ar = static_cast<float>(height) / static_cast<float>(width);
             if (width > height)
             {
-                twidth = static_cast<UINT>(maxsize);
+                twidth = maxsize;
                 theight = static_cast<UINT>(static_cast<float>(maxsize) * ar);
             }
             else
             {
-                theight = static_cast<UINT>(maxsize);
+                theight = maxsize;
                 twidth = static_cast<UINT>(static_cast<float>(maxsize) / ar);
             }
             assert(twidth <= maxsize && theight <= maxsize);
@@ -327,7 +327,7 @@ namespace
 
         WICPixelFormatGUID convertGUID = wicFormat;
 
-        size_t bpp = 0;
+        UINT bpp = 0;
         DXGI_FORMAT dxgiFormat = WICFormatToDXGIFormat(wicFormat);
         if (dxgiFormat == DXGI_FORMAT_UNKNOWN)
         {
@@ -373,15 +373,55 @@ namespace
             bpp = 32;
         }
 
-        const size_t rowPitch = (twidth * bpp + 7) / 8;
-        const size_t imageSize = rowPitch * theight;
+        // Checking inputs to make sure the final results
+        //  fit in a UINT
+        //  These are not expected to fail in normal ops
+        //  But perhaps someone passes in a fuzzied image
 
-        std::unique_ptr<uint8_t[]> temp(new uint8_t[imageSize]);
+        // bits per pixel of 64 supports up to 16bits per channel
+        constexpr UINT MaxBpp = 64;
+        constexpr UINT MaxSize = 8192;
+
+        assert(bpp <= MaxBpp && bpp > 0);
+        if (!(bpp <= MaxBpp && bpp > 0))
+        {
+            hr = E_INVALIDARG;
+            LOG_HR(hr);
+            return empty;
+        }
+
+        assert(twidth <= MaxSize && twidth > 0);
+        if (!(twidth <= MaxSize && twidth > 0))
+        {
+            hr = E_INVALIDARG;
+            LOG_HR(hr);
+            return empty;
+        }
+
+        assert(theight <= MaxSize && theight > 0);
+        if (!(theight <= MaxSize && theight > 0))
+        {
+            hr = E_INVALIDARG;
+            LOG_HR(hr);
+            return empty;
+        }
+
+        // Convert to 64bits so we don't get overflows in the static assert
+        constexpr size_t MaxBppSz = MaxBpp;
+        constexpr size_t MaxSizeSz = MaxSize;
+        static_assert(
+            (MaxSizeSz * (MaxSizeSz * MaxBppSz + 7) / 8) < UINT_MAX,
+            "The maximum combination of size and bits per pixel must fit in UINT");
+
+        const UINT rowPitch = (twidth * bpp + 7) / 8;
+        const UINT imageSize = rowPitch * theight;
+
+        auto temp = std::make_unique<uint8_t[]>(imageSize);
 
         if (convertGUID == wicFormat && twidth == width && theight == height)
         {
             // No format conversion or resize needed
-            hr = frame->CopyPixels(0, static_cast<UINT>(rowPitch), static_cast<UINT>(imageSize), temp.get());
+            hr = frame->CopyPixels(nullptr, rowPitch, imageSize, temp.get());
             if (FAILED(hr))
             {
                 LOG_HR(hr);
@@ -416,7 +456,7 @@ namespace
             if (convertGUID == pfScaler)
             {
                 // No format conversion needed
-                hr = scaler->CopyPixels(0, static_cast<UINT>(rowPitch), static_cast<UINT>(imageSize), temp.get());
+                hr = scaler->CopyPixels(nullptr, rowPitch, imageSize, temp.get());
                 if (FAILED(hr))
                 {
                     LOG_HR(hr);
@@ -440,7 +480,7 @@ namespace
                     return empty;
                 }
 
-                hr = fc->CopyPixels(0, static_cast<UINT>(rowPitch), static_cast<UINT>(imageSize), temp.get());
+                hr = fc->CopyPixels(nullptr, rowPitch, imageSize, temp.get());
                 if (FAILED(hr))
                 {
                     LOG_HR(hr);
@@ -465,7 +505,7 @@ namespace
                 return empty;
             }
 
-            hr = fc->CopyPixels(0, static_cast<UINT>(rowPitch), static_cast<UINT>(imageSize), temp.get());
+            hr = fc->CopyPixels(nullptr, rowPitch, imageSize, temp.get());
             if (FAILED(hr))
             {
                 LOG_HR(hr);
@@ -498,8 +538,8 @@ namespace
 
         D3D11_SUBRESOURCE_DATA initData;
         initData.pSysMem = temp.get();
-        initData.SysMemPitch = static_cast<UINT>(rowPitch);
-        initData.SysMemSlicePitch = static_cast<UINT>(imageSize);
+        initData.SysMemPitch = rowPitch;
+        initData.SysMemSlicePitch = imageSize;
 
         wil::com_ptr<ID3D11Texture2D> texture;
         hr = d3dDevice->CreateTexture2D(
@@ -532,8 +572,8 @@ namespace
                 0,
                 nullptr,
                 temp.get(),
-                static_cast<UINT>(rowPitch),
-                static_cast<UINT>(imageSize));
+                rowPitch,
+                imageSize);
             d3dContext->GenerateMips(textureView.get());
         }
 
