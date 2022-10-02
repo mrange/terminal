@@ -19,12 +19,14 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="AtlasEngine.cpp" />
+    <ClCompile Include="TextureLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dwrite.h" />
     <ClInclude Include="DWriteTextAnalysis.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="AtlasEngine.h" />
+    <ClInclude Include="TextureLoader.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="custom_shader_ps.hlsl">

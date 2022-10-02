@@ -10,6 +10,8 @@
 #include "../../renderer/inc/IRenderEngine.hpp"
 #include "DWriteTextAnalysis.h"
 
+#include "TextureLoader.h"
+
 namespace Microsoft::Console::Render
 {
     struct TextAnalysisSinkResult;
@@ -180,12 +182,6 @@ namespace Microsoft::Console::Render
             u8 shapes = 0;
 
             u8 bidiLevel = 0;
-        };
-
-        struct CustomShaderTexture
-        {
-            wil::com_ptr<ID3D11Texture2D> Texture;
-            wil::com_ptr<ID3D11ShaderResourceView> TextureView;
         };
 
     private:
@@ -1011,7 +1007,7 @@ namespace Microsoft::Console::Render
             wil::com_ptr<ID3D11PixelShader> customPixelShader;
             wil::com_ptr<ID3D11Buffer> customShaderConstantBuffer;
             wil::com_ptr<ID3D11SamplerState> customShaderSamplerState;
-            CustomShaderTexture customShaderTexture;
+            ShaderTexture customShaderTexture;
             std::chrono::steady_clock::time_point customShaderStartTime;
 
             // D2D resources
