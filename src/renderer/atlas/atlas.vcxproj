@@ -8,9 +8,22 @@
     <TargetName>ConRenderAtlas</TargetName>
     <ConfigurationType>StaticLibrary</ConfigurationType>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='AuditMode|x64'">
+    <IncludePath>$(SolutionDir)\dep\DirectXTK\Inc;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(SolutionDir)\dep\DirectXTK\Inc;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Fuzzing|x64'">
+    <IncludePath>$(SolutionDir)\dep\DirectXTK\Inc;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(SolutionDir)\dep\DirectXTK\Inc;$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <Import Project="$(SolutionDir)src\common.build.pre.props" />
   <Import Project="$(SolutionDir)src\common.nugetversions.props" />
   <ItemGroup>
+    <ClCompile Include="..\..\..\dep\DirectXTK\Src\WICTextureLoader.cpp" />
     <ClCompile Include="AtlasEngine.api.cpp" />
     <ClCompile Include="AtlasEngine.r.cpp" />
     <ClCompile Include="dwrite.cpp" />

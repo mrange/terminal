@@ -681,7 +681,6 @@ void AtlasEngine::_createResources()
         {
             _r.customShaderTexture = LoadShaderTextureFromFile(
                 _r.device.get(),
-                _r.deviceContext.get(),
                 _api.customPixelShaderImagePath);
         }
 

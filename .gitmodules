@@ -4,3 +4,6 @@
 [submodule "dep/wil"]
 	path = dep/wil
 	url = https://github.com/microsoft/wil
+[submodule "dep/DirectXTK"]
+	path = dep/DirectXTK
+	url = https://github.com/microsoft/DirectXTK.git
